@@ -7,6 +7,7 @@ By [dongt10](https://github.com/dongt10).
 ## What it does
 
 - Loads your Instagram follower and following lists from the currently signed-in browser tab.
+- Detects the username from the Instagram profile URL you are currently viewing.
 - De-duplicates usernames across paginated responses.
 - Prints the accounts you follow that do not follow you back.
 - Runs locally in your browser session.
@@ -16,7 +17,7 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 ## Quick Start
 
 1. Open Instagram in a desktop browser and sign in.
-2. Go to your profile page.
+2. Go to your profile page, for example `https://www.instagram.com/your_username/`.
 3. Open DevTools Console:
    - macOS: `Command + Option + J`
    - Windows/Linux: `Ctrl + Shift + J`
@@ -26,6 +27,14 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 The page will be replaced with a plain text report.
 
 Refresh the page to return to Instagram.
+
+## Check a Different Username
+
+The script automatically uses the first part of the current Instagram profile URL. If you want to override that, run this in the console before pasting the script:
+
+```js
+window.IG_FOLLOW_BACK_USERNAME = "your_username";
+```
 
 ## Bookmarklet
 

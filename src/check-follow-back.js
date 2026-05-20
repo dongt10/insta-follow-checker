@@ -1,9 +1,17 @@
 (() => {
-  const USERNAME = "dongt10";
   const PAGE_SIZE = 50;
   const MAX_PAGES = 40;
   const REQUEST_DELAY_MS = 250;
   const INSTAGRAM_WEB_APP_ID = "936619743392459";
+  const RESERVED_PATHS = new Set([
+    "accounts",
+    "direct",
+    "explore",
+    "p",
+    "reel",
+    "reels",
+    "stories",
+  ]);
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -30,6 +38,24 @@
     }
 
     return [...usersByName.values()];
+  }
+
+  function getTargetUsername() {
+    if (window.IG_FOLLOW_BACK_USERNAME) {
+      return String(window.IG_FOLLOW_BACK_USERNAME).replace(/^@/, "").trim();
+    }
+
+    const username = window.location.pathname
+      .split("/")
+      .filter(Boolean)[0]
+      ?.replace(/^@/, "")
+      .trim();
+
+    if (username && !RESERVED_PATHS.has(username.toLowerCase())) {
+      return username;
+    }
+
+    return prompt("Instagram username to check:")?.replace(/^@/, "").trim();
   }
 
   async function loadRelationshipList(type, userId) {
@@ -76,8 +102,14 @@
   }
 
   async function run() {
+    const username = getTargetUsername();
+
+    if (!username) {
+      throw new Error("Open an Instagram profile page or provide a username.");
+    }
+
     const profile = await getJson(
-      `/api/v1/users/web_profile_info/?username=${encodeURIComponent(USERNAME)}`,
+      `/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
     );
 
     const user = profile.data.user;
@@ -102,6 +134,7 @@
 
     renderReport(
       [
+        `username ${user.username}`,
         `profile following ${user.edge_follow.count}`,
         `profile followers ${user.edge_followed_by.count}`,
         `loaded unique following ${following.length}`,
