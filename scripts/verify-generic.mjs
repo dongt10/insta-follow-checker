@@ -5,11 +5,18 @@ const runnableFiles = [
   new URL("../bookmarklet.js", import.meta.url),
 ];
 
+const packageJson = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+);
+const packageAuthor = packageJson.author?.trim();
+
 for (const file of runnableFiles) {
   const contents = await readFile(file, "utf8");
 
-  if (contents.includes("dongt10")) {
-    throw new Error(`${file.pathname} must not hardcode a specific Instagram username`);
+  if (packageAuthor && contents.includes(packageAuthor)) {
+    throw new Error(
+      `${file.pathname} must not hardcode the package author as an Instagram username`,
+    );
   }
 }
 
