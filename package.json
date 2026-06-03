@@ -11,7 +11,8 @@
   "type": "module",
   "private": false,
   "scripts": {
-    "check": "node --check src/check-follow-back.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs"
+    "build:bookmarklet": "node scripts/build-bookmarklet.mjs",
+    "check": "node --check src/check-follow-back.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-one-by-one.mjs"
   },
   "keywords": [
     "instagram",

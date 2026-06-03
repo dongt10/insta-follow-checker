@@ -29,4 +29,8 @@ if (!source.includes("window.location.pathname")) {
   throw new Error("source script must detect the username from the current profile URL");
 }
 
+if (!source.includes("checkAccountProfile")) {
+  throw new Error("source script must check each followed profile one by one");
+}
+
 console.log("generic username check ok");
