@@ -29,8 +29,20 @@ if (!source.includes("window.location.pathname")) {
   throw new Error("source script must detect the username from the current profile URL");
 }
 
-if (!source.includes("checkAccountProfile")) {
-  throw new Error("source script must check each followed profile one by one");
+if (!source.includes("loadRelationshipList(\"followers\"")) {
+  throw new Error("source script must load followers before exact verification");
+}
+
+if (!source.includes("exactFollowerSearch")) {
+  throw new Error("source script must exact-search tentative misses before counting them");
+}
+
+if (!source.includes("correctedByExactSearch")) {
+  throw new Error("source script must report tentative misses corrected by exact follower search");
+}
+
+if (!source.includes("unknown")) {
+  throw new Error("source script must keep auth/rate-limit failures out of verified misses");
 }
 
 console.log("generic username check ok");
