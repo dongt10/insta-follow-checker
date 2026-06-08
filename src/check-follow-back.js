@@ -20,10 +20,10 @@
     targetUsername: "",
     relationshipPageSizes: [100, 50],
     relationshipPasses: 1,
-    relationshipListDelayMs: 1100,
-    exactSearchDelayMs: 1400,
+    relationshipListDelayMs: 1800,
+    exactSearchDelayMs: 2400,
     retryLimit: 5,
-    retryBaseDelayMs: 6500,
+    retryBaseDelayMs: 12000,
     maxPagesPerPass: 250,
     exactSearchCount: 50,
     stopExactSearchOnAuthLost: true,
@@ -71,15 +71,22 @@
     }
   }
 
-  function isAuthOrRateLimit(status, text) {
+  function responseBlockReason(status, text) {
     const lowered = String(text || "").toLowerCase();
 
-    return (
-      status === 401
-      || status === 403
-      || (lowered.includes("login") && lowered.includes("required"))
-      || lowered.includes("please wait a few minutes")
-    );
+    if (status === 401 || status === 403 || lowered.includes("login_required")) {
+      return "auth";
+    }
+
+    if (lowered.includes("please wait a few minutes") || lowered.includes("temporarily blocked")) {
+      return "rate";
+    }
+
+    if (lowered.includes("login") && lowered.includes("required")) {
+      return "auth";
+    }
+
+    return "";
   }
 
   function progress(message, phase = state.phase) {
@@ -142,9 +149,12 @@
         });
         const text = await response.text();
 
-        if (isAuthOrRateLimit(response.status, text)) {
-          throw new FetchProblem(`${label}: login or rate-limit wall (${response.status})`, {
-            authLost: true,
+        const blockReason = responseBlockReason(response.status, text);
+
+        if (blockReason) {
+          throw new FetchProblem(`${label}: ${blockReason === "rate" ? "rate-limit" : "login"} wall (${response.status})`, {
+            authLost: blockReason === "auth",
+            rateLimited: blockReason === "rate",
             status: response.status,
           });
         }
@@ -168,7 +178,7 @@
       } catch (error) {
         lastError = error;
 
-        if (error.authLost) {
+        if (error.authLost && !error.rateLimited) {
           throw error;
         }
 
@@ -308,10 +318,40 @@
           pageCount += 1;
 
           const cursor = maxId ? `&max_id=${encodeURIComponent(maxId)}` : "";
-          const response = await getJson(
-            `/api/v1/friendships/${target.id}/${type}/?count=${encodeURIComponent(pageSize)}${cursor}`,
-            `${type} page ${pageCount}`,
-          );
+          let response;
+
+          try {
+            response = await getJson(
+              `/api/v1/friendships/${target.id}/${type}/?count=${encodeURIComponent(pageSize)}${cursor}`,
+              `${type} page ${pageCount}`,
+            );
+          } catch (error) {
+            if (!error.authLost && !error.rateLimited) {
+              throw error;
+            }
+
+            const stopReason = error.message || String(error);
+            progress(`${type} stopped early: ${stopReason}`, type);
+            passes.push({
+              kind: type,
+              pass: `round${pass}`,
+              count: pageSize,
+              pages: pageCount,
+              before,
+              after: usersByUsername.size,
+              added: usersByUsername.size - before,
+              status: error.rateLimited ? "rate-limited" : "auth-blocked",
+            });
+
+            return {
+              usersByUsername,
+              passes,
+              stoppedEarly: true,
+              stopReason,
+              stopStatus: error.rateLimited ? "rate-limited" : "auth-blocked",
+            };
+          }
+
           const users = extractUsers(response);
           const added = addUsers(usersByUsername, users);
 
@@ -348,6 +388,9 @@
     return {
       usersByUsername,
       passes,
+      stoppedEarly: false,
+      stopReason: "",
+      stopStatus: "",
     };
   }
 
@@ -395,6 +438,7 @@
         <td>${escapeHtml(pass.before)}</td>
         <td>${escapeHtml(pass.after)}</td>
         <td>${escapeHtml(pass.added)}</td>
+        <td>${escapeHtml(pass.status)}</td>
       </tr>
     `).join("");
 
@@ -438,7 +482,7 @@
       <ol class="cols">${resultLines(result.correctedByExactSearch)}</ol>
       <h2>Load passes</h2>
       <table>
-        <thead><tr><th>Kind</th><th>Pass</th><th>Count</th><th>Pages</th><th>Before</th><th>After</th><th>Added</th></tr></thead>
+        <thead><tr><th>Kind</th><th>Pass</th><th>Count</th><th>Pages</th><th>Before</th><th>After</th><th>Added</th><th>Status</th></tr></thead>
         <tbody>${passRows}</tbody>
       </table>
       <p>Full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
@@ -462,62 +506,93 @@
 
     const followingLoad = await loadRelationshipList("following", target);
     const followerLoad = await loadRelationshipList("followers", target);
-    const tentativeMisses = [...followingLoad.usersByUsername.values()]
-      .filter((account) => !followerLoad.usersByUsername.has(normalizeUsername(account.username)))
-      .sort((left, right) => left.username.localeCompare(right.username));
+    const warnings = [];
+    const followerListUnavailable = (
+      followerLoad.stoppedEarly
+      && followerLoad.usersByUsername.size === 0
+      && (typeof target.followerCount !== "number" || target.followerCount > 0)
+    );
+    const followingListUnavailable = (
+      followingLoad.stoppedEarly
+      && followingLoad.usersByUsername.size === 0
+      && (typeof target.followingCount !== "number" || target.followingCount > 0)
+    );
+    const tentativeMisses = followerListUnavailable || followingListUnavailable
+      ? []
+      : [...followingLoad.usersByUsername.values()]
+        .filter((account) => !followerLoad.usersByUsername.has(normalizeUsername(account.username)))
+        .sort((left, right) => left.username.localeCompare(right.username));
     const verifiedNotFollowingBack = [];
     const correctedByExactSearch = [];
     const unknown = [];
     let authLost = false;
 
-    progress(
-      `Exact-checking ${tentativeMisses.length} tentative misses. Unknowns will not be counted as not following back.`,
-      "exact verification",
-    );
+    if (followerListUnavailable || followingListUnavailable) {
+      progress(
+        "Stopped safely before exact verification because Instagram blocked a required relationship list. No accounts were counted.",
+        "blocked",
+      );
+    } else {
+      progress(
+        `Exact-checking ${tentativeMisses.length} tentative misses. Unknowns will not be counted as not following back.`,
+        "exact verification",
+      );
 
-    for (let index = 0; index < tentativeMisses.length; index += 1) {
-      const account = tentativeMisses[index];
+      for (let index = 0; index < tentativeMisses.length; index += 1) {
+        const account = tentativeMisses[index];
 
-      if (authLost && CONFIG.stopExactSearchOnAuthLost) {
-        unknown.push({
-          ...account,
-          reason: "Login or rate-limit wall appeared before exact search.",
-        });
-        continue;
-      }
-
-      try {
-        if (await exactFollowerSearch(target, account.username)) {
-          correctedByExactSearch.push(account);
-        } else {
-          verifiedNotFollowingBack.push(account);
-        }
-      } catch (error) {
-        if (error.authLost) {
-          authLost = true;
+        if (authLost && CONFIG.stopExactSearchOnAuthLost) {
+          unknown.push({
+            ...account,
+            reason: "Login or rate-limit wall appeared before exact search.",
+          });
+          continue;
         }
 
-        unknown.push({
-          ...account,
-          reason: error.message || String(error),
-        });
-      }
+        try {
+          if (await exactFollowerSearch(target, account.username)) {
+            correctedByExactSearch.push(account);
+          } else {
+            verifiedNotFollowingBack.push(account);
+          }
+        } catch (error) {
+          if (error.authLost || error.rateLimited) {
+            authLost = true;
+          }
 
-      if ((index + 1) % 10 === 0 || index + 1 === tentativeMisses.length) {
-        progress(
-          `Exact checked ${index + 1}/${tentativeMisses.length}: corrected ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
-          "exact verification",
-        );
-      }
+          unknown.push({
+            ...account,
+            reason: error.message || String(error),
+          });
+        }
 
-      await sleep(jitter(CONFIG.exactSearchDelayMs));
+        if ((index + 1) % 10 === 0 || index + 1 === tentativeMisses.length) {
+          progress(
+            `Exact checked ${index + 1}/${tentativeMisses.length}: corrected ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
+            "exact verification",
+          );
+        }
+
+        await sleep(jitter(CONFIG.exactSearchDelayMs));
+      }
     }
 
-    const warnings = [];
+    if (followingLoad.stoppedEarly) {
+      warnings.push(`Following list stopped early: ${followingLoad.stopReason}. Loaded accounts were kept, but accounts Instagram did not expose cannot be checked in this run.`);
+    }
+
+    if (followerLoad.stoppedEarly) {
+      warnings.push(`Followers list stopped early: ${followerLoad.stopReason}. No false positives were counted from the blocked data.`);
+    }
+
+    if (followingListUnavailable || followerListUnavailable) {
+      warnings.push("No reliable not-following-back result was produced because Instagram blocked a required list before enough data loaded. Wait 10-15 minutes, refresh the profile, and rerun the latest GitHub script with the default slower delays.");
+    }
 
     if (
       typeof target.followingCount === "number"
       && followingLoad.usersByUsername.size < target.followingCount
+      && !followingListUnavailable
     ) {
       warnings.push(`Bulk following list exposed ${followingLoad.usersByUsername.size} of ${target.followingCount}. The verified list has no known false positives, but it may miss not-followbacks among accounts Instagram did not expose.`);
     }
@@ -525,6 +600,7 @@
     if (
       typeof target.followerCount === "number"
       && followerLoad.usersByUsername.size < target.followerCount
+      && !followerListUnavailable
     ) {
       warnings.push(`Bulk followers list exposed ${followerLoad.usersByUsername.size} of ${target.followerCount}. Each tentative miss was exact-searched in followers; exact-search hits were corrected, and exact-search failures were moved to Unknown.`);
     }

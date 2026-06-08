@@ -48,8 +48,8 @@ By default, the script pauses between paginated relationship-list requests and e
 
 ```js
 window.IG_FOLLOW_BACK_CONFIG = {
-  relationshipListDelayMs: 1100,
-  exactSearchDelayMs: 1400,
+  relationshipListDelayMs: 1800,
+  exactSearchDelayMs: 2400,
 };
 ```
 
@@ -66,6 +66,8 @@ Create a new bookmark, paste the contents of `bookmarklet.js` into the URL field
 Instagram may show profile counts that differ from the loaded list counts because of stale counts, unavailable accounts, or pagination quirks. This matters on accounts over 1k: the bulk followers endpoint can miss people who are actually followers.
 
 To avoid false positives, the script does not trust the bulk comparison by itself. It exact-searches each tentative miss in the target profile's followers. If exact search finds the username, the account is moved to "Corrected by exact follower search." If exact search fails because of a login or rate-limit wall, the account is moved to "Unknown" instead of being counted as not following back.
+
+If you see a warning like `rate-limit wall (200)`, Instagram returned a temporary block page while still using HTTP 200. The script retries those responses and, if the block persists, stops safely with no verified misses counted. Wait 10-15 minutes, refresh the profile, and rerun with the default slower delays.
 
 The final report also keeps the full structured result in `window.IG_FOLLOW_BACK_RESULTS` and `window.IG_OVER1K_FOLLOW_BACK_RESULTS` until the page is reloaded.
 
