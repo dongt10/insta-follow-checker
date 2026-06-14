@@ -79,6 +79,14 @@ const context = vm.createContext({
       return jsonResponse({ users: [] });
     }
 
+    if (url === "/api/v1/friendships/1/followers/?count=50&search_surface=follow_list_page&query=alice") {
+      return jsonResponse({
+        users: [
+          { id: "2", username: "alice", full_name: "Alice" },
+        ],
+      });
+    }
+
     if (url === "/api/v1/friendships/1/followers/?count=50&search_surface=follow_list_page&query=bob") {
       return jsonResponse({
         users: [
@@ -142,9 +150,9 @@ for (
 
 const expectedCalls = [
   "/api/v1/friendships/1/following/?count=100",
-  "/api/v1/friendships/1/following/?count=50",
   "/api/v1/friendships/1/followers/?count=100",
   "/api/v1/friendships/1/followers/?count=50",
+  "/api/v1/friendships/1/followers/?count=50&search_surface=follow_list_page&query=alice",
   "/api/v1/friendships/1/followers/?count=50&search_surface=follow_list_page&query=bob",
   "/api/v1/friendships/1/followers/?count=50&search_surface=follow_list_page&query=carol",
   "/api/v1/friendships/1/followers/?count=50&query=carol",
@@ -156,11 +164,15 @@ for (const expected of expectedCalls) {
   }
 }
 
+if (fetchCalls.includes("/api/v1/friendships/1/following/?count=50")) {
+  throw new Error(`complete following list should skip the extra count=50 pass:\n${fetchCalls.join("\n")}`);
+}
+
 if (!bodyHtml.includes("Verified not following back (1)") || !bodyHtml.includes("@carol")) {
   throw new Error(`expected carol to be verified as not following back:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("Corrected by exact follower search (1)") || !bodyHtml.includes("@bob")) {
+if (!bodyHtml.includes("Follows back - corrected (1)") || !bodyHtml.includes("@bob")) {
   throw new Error(`expected bob to be corrected by exact search:\n${bodyHtml}`);
 }
 

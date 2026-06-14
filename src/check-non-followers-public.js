@@ -18,38 +18,32 @@
   ]);
   const DEFAULT_CONFIG = {
     targetUsername: "",
-    relationshipPageSizes: [100, 50],
-    relationshipPasses: 1,
-    relationshipListDelayMs: 1800,
-    exactSearchDelayMs: 2400,
-    exactSearchMaxPages: 3,
-    batchVerify: true,
-    batchSize: 25,
-    batchDelayMs: 2600,
-    skipFollowerListWhenSelf: "auto",
-    minRequestIntervalMs: 700,
-    retryLimit: 5,
-    retryBaseDelayMs: 12000,
-    retryMaxDelayMs: 180000,
+    followerPageSize: 100,
+    followingPageSize: 100,
+    listDelayMs: 3500,
+    minRequestIntervalMs: 1500,
+    verifyMisses: "auto",
+    verifyDelayMs: 4500,
+    verifyMaxPages: 3,
+    maxVerifications: 150,
+    completenessTolerance: 0.99,
+    retryLimit: 4,
+    retryBaseDelayMs: 20000,
+    retryMaxDelayMs: 300000,
     maxSlowdownFactor: 8,
-    maxPagesPerPass: 250,
+    maxPagesPerList: 400,
     exactSearchCount: 50,
-    stopExactSearchOnAuthLost: true,
     resume: true,
     resumeTtlMs: 3600000,
   };
   const CONFIG = Object.assign(
     {},
     DEFAULT_CONFIG,
-    window.IG_OVER1K_CONFIG || {},
-    window.IG_FOLLOW_BACK_CONFIG || {},
+    window.IG_NON_FOLLOWERS_CONFIG || {},
+    window.IG_PUBLIC_CONFIG || {},
   );
 
-  if (!Array.isArray(CONFIG.relationshipPageSizes) || CONFIG.relationshipPageSizes.length === 0) {
-    CONFIG.relationshipPageSizes = DEFAULT_CONFIG.relationshipPageSizes;
-  }
-
-  CONFIG.batchSize = Math.max(1, Math.floor(Number(CONFIG.batchSize) || DEFAULT_CONFIG.batchSize));
+  CONFIG.maxVerifications = Math.max(0, Math.floor(Number(CONFIG.maxVerifications) || 0));
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalizeUsername = (value) => String(value || "").trim().toLowerCase();
@@ -69,14 +63,14 @@
   const state = {
     startedAt: new Date().toISOString(),
     phase: "starting",
-    message: "Starting Instagram follow-back check...",
+    message: "Starting Instagram non-follower check...",
     logs: [],
     requests: 0,
     walls: 0,
     done: false,
   };
-  window.IG_FOLLOW_BACK_STATE = state;
-  window.IG_OVER1K_STATE = state;
+  window.IG_NON_FOLLOWERS_STATE = state;
+  window.IG_PUBLIC_STATE = state;
 
   const pacing = {
     slowdownFactor: 1,
@@ -147,8 +141,25 @@
       || trimmed.includes("<body");
   }
 
+  const RATE_PHRASES = [
+    "please wait a few minutes",
+    "temporarily blocked",
+    "feedback_required",
+    "we limit how often",
+    "restrict certain activity",
+    "we restrict certain activity",
+    "try again later",
+    "action blocked",
+    "automated behavior",
+    "please wait a few moments",
+  ];
+
+  function includesRatePhrase(text) {
+    return RATE_PHRASES.some((phrase) => text.includes(phrase));
+  }
+
   function jsonBlockReason(status, parsed) {
-    const message = String(parsed?.message || "").toLowerCase();
+    const message = `${String(parsed?.message || "")} ${String(parsed?.feedback_message || "")} ${String(parsed?.title || "")}`.toLowerCase();
 
     if (
       status === 401
@@ -161,9 +172,9 @@
 
     if (
       status === 429
-      || message.includes("please wait a few minutes")
-      || message.includes("temporarily blocked")
-      || message.includes("feedback_required")
+      || parsed?.spam === true
+      || String(parsed?.feedback_action || "").length > 0
+      || includesRatePhrase(message)
     ) {
       return "rate";
     }
@@ -184,7 +195,7 @@
       return "auth";
     }
 
-    if (status === 429 || lowered.includes("please wait a few minutes") || lowered.includes("temporarily blocked")) {
+    if (status === 429 || includesRatePhrase(lowered)) {
       return "rate";
     }
 
@@ -222,16 +233,16 @@
     state.phase = phase;
     state.message = message;
     state.logs.push({ at: new Date().toISOString(), message });
-    console.log(`[IG follow-back] ${message}`);
+    console.log(`[IG non-followers] ${message}`);
     renderProgress();
   }
 
   function renderProgress() {
-    let box = document.getElementById("ig-follow-back-progress-box");
+    let box = document.getElementById("ig-non-followers-progress-box");
 
     if (!box) {
       box = document.createElement("div");
-      box.id = "ig-follow-back-progress-box";
+      box.id = "ig-non-followers-progress-box";
       Object.assign(box.style, {
         position: "fixed",
         zIndex: 2147483647,
@@ -257,7 +268,7 @@
       .join("");
 
     box.innerHTML = `
-      <div style="font-weight:700;font-size:15px;margin-bottom:6px;">IG follow-back checker</div>
+      <div style="font-weight:700;font-size:15px;margin-bottom:6px;">IG non-follower checker (public)</div>
       <div><strong>Phase:</strong> ${escapeHtml(state.phase)}</div>
       <div><strong>Status:</strong> ${escapeHtml(state.message)}</div>
       <div><strong>Requests:</strong> ${escapeHtml(state.requests)} | <strong>Pacing:</strong> ${escapeHtml(pacing.slowdownFactor)}x</div>
@@ -265,37 +276,22 @@
     `;
   }
 
-  async function getJson(url, label, options = {}) {
+  async function getJson(url, label) {
     let lastError = null;
 
     for (let attempt = 0; attempt <= CONFIG.retryLimit; attempt += 1) {
       try {
         await throttleBeforeRequest();
 
-        const headers = {
-          accept: "application/json",
-          "x-ig-app-id": INSTAGRAM_WEB_APP_ID,
-        };
-        const init = {
-          credentials: "include",
-          headers,
-        };
-
-        if (options.method === "POST") {
-          init.method = "POST";
-          init.body = options.body || "";
-          headers["content-type"] = "application/x-www-form-urlencoded";
-
-          const csrfToken = getCookie("csrftoken");
-
-          if (csrfToken) {
-            headers["x-csrftoken"] = csrfToken;
-          }
-        }
-
         state.requests += 1;
 
-        const response = await fetch(url, init);
+        const response = await fetch(url, {
+          credentials: "include",
+          headers: {
+            accept: "application/json",
+            "x-ig-app-id": INSTAGRAM_WEB_APP_ID,
+          },
+        });
         const text = await response.text();
         const contentType = response.headers?.get?.("content-type") || "";
         const retryAfterMs = parseRetryAfterMs(response);
@@ -317,7 +313,7 @@
         if (blockReason) {
           const blockLabel = {
             auth: "login",
-            rate: "rate-limit",
+            rate: "rate-limit / action block",
             html: "HTML/non-JSON",
           }[blockReason];
 
@@ -408,7 +404,7 @@
   }
 
   function getTargetUsername() {
-    const configuredUsername = CONFIG.targetUsername || window.IG_FOLLOW_BACK_USERNAME;
+    const configuredUsername = CONFIG.targetUsername || window.IG_NON_FOLLOWERS_USERNAME;
 
     if (configuredUsername) {
       return String(configuredUsername).replace(/^@/, "").trim();
@@ -424,7 +420,7 @@
       return username;
     }
 
-    return prompt("Instagram username to check:")?.replace(/^@/, "").trim();
+    return prompt("Instagram username to check (the account you are viewing):")?.replace(/^@/, "").trim();
   }
 
   function profileCount(user, key) {
@@ -476,7 +472,7 @@
   }
 
   function resumeKey(targetId) {
-    return `ig-follow-back-resume:${getCookie("ds_user_id") || "anon"}:${targetId}`;
+    return `ig-non-followers-resume:${getCookie("ds_user_id") || "anon"}:${targetId}`;
   }
 
   function verdictKey(account) {
@@ -574,31 +570,29 @@
     const user = profile?.data?.user || profile?.user;
 
     if (!user?.id && !user?.pk) {
-      throw new Error(`Could not load profile data for @${username}. Instagram may have changed its response or the profile may be unavailable.`);
+      throw new Error(`Could not load profile data for @${username}. The profile may be unavailable, or Instagram changed its response.`);
     }
 
     return {
       id: String(user.id || user.pk),
       username: user.username || username,
       fullName: user.full_name || "",
+      isPrivate: Boolean(user.is_private),
+      followedByViewer: Boolean(user.followed_by_viewer),
       followerCount: profileCount(user, "followers"),
       followingCount: profileCount(user, "following"),
     };
   }
 
-  async function loadRelationshipList(type, target, resume, options = {}) {
+  async function loadRelationshipList(type, target, resume) {
     const expectedCount = type === "followers" ? target.followerCount : target.followingCount;
+    const pageSize = type === "followers" ? CONFIG.followerPageSize : CONFIG.followingPageSize;
     const savedList = resume.lists[type];
     const savedAccounts = Array.isArray(savedList?.accounts)
       ? savedList.accounts.filter((account) => account && typeof account.username === "string" && account.username)
       : [];
     const usersByUsername = new Map();
     const passes = [];
-    const listIsComplete = () => (
-      typeof expectedCount === "number"
-      && expectedCount >= 0
-      && usersByUsername.size >= expectedCount
-    );
 
     if (
       savedList?.complete
@@ -626,28 +620,32 @@
         stoppedEarly: false,
         stopReason: "",
         stopStatus: "",
-        resumed: true,
+        reachedEnd: true,
       };
     }
 
-    let resumeCursor = "";
-    let resumePageSize = 0;
+    let maxId = "";
+    let seededFromCursor = false;
 
     if (savedAccounts.length > 0) {
       addUsers(usersByUsername, savedAccounts);
 
       if (!savedList.complete && savedList.maxId) {
-        resumeCursor = String(savedList.maxId);
-        resumePageSize = Number(savedList.pageSize) > 0 ? Number(savedList.pageSize) : CONFIG.relationshipPageSizes[0];
+        maxId = String(savedList.maxId);
+        seededFromCursor = true;
       }
 
       progress(
-        `Seeding the ${type} list with ${usersByUsername.size} accounts saved ${resume.ageMinutes} minutes ago${resumeCursor ? ", continuing from the saved position" : ""}.`,
+        `Seeding the ${type} list with ${usersByUsername.size} accounts saved ${resume.ageMinutes} minutes ago${seededFromCursor ? ", continuing from the saved position" : ""}.`,
         type,
       );
     }
 
-    const savePartial = (maxId, pageSize) => {
+    const before = usersByUsername.size;
+    let pageCount = 0;
+    let reachedEnd = false;
+
+    const savePartial = () => {
       if (!CONFIG.resume) {
         return;
       }
@@ -661,167 +659,96 @@
       saveResumeState(target.id, resume);
     };
 
-    const runSweep = async (pageSize, passName, initialMaxId) => {
-      let maxId = initialMaxId || "";
-      let pageCount = 0;
-      const before = usersByUsername.size;
+    while (pageCount < CONFIG.maxPagesPerList) {
+      pageCount += 1;
 
-      while (pageCount < CONFIG.maxPagesPerPass) {
-        pageCount += 1;
+      const cursorParam = maxId ? `&max_id=${encodeURIComponent(maxId)}` : "";
+      let response;
 
-        const cursorParam = maxId ? `&max_id=${encodeURIComponent(maxId)}` : "";
-        let response;
-
-        try {
-          response = await getJson(
-            `/api/v1/friendships/${target.id}/${type}/?count=${encodeURIComponent(pageSize)}${cursorParam}`,
-            `${type} page ${pageCount}`,
-          );
-        } catch (error) {
-          if (!error.authLost && !error.rateLimited && !error.relationshipBlocked) {
-            if (initialMaxId && pageCount === 1) {
-              progress(`${type}: the saved resume position was rejected, restarting this list from the beginning.`, type);
-              passes.push({
-                kind: type,
-                pass: passName,
-                count: pageSize,
-                pages: pageCount,
-                before,
-                after: usersByUsername.size,
-                added: 0,
-                status: "cursor-rejected",
-              });
-
-              return { outcome: "cursor-rejected" };
-            }
-
-            throw error;
-          }
-
-          const stopReason = error.message || String(error);
-          const stopStatus = error.rateLimited
-            ? "rate-limited"
-            : error.relationshipBlocked
-              ? "html-blocked"
-              : "auth-blocked";
-
-          progress(`${type} stopped early: ${stopReason}`, type);
-          passes.push({
-            kind: type,
-            pass: passName,
-            count: pageSize,
-            pages: pageCount,
-            before,
-            after: usersByUsername.size,
-            added: usersByUsername.size - before,
-            status: stopStatus,
-          });
-          savePartial(maxId, pageSize);
-
-          return { outcome: "stopped", stopReason, stopStatus };
-        }
-
-        const users = extractUsers(response);
-        const added = addUsers(usersByUsername, users);
-
-        progress(
-          `${type} count ${pageSize}: page ${pageCount}, page users ${users.length}, added ${added}, union ${usersByUsername.size}`,
-          type,
+      try {
+        response = await getJson(
+          `/api/v1/friendships/${target.id}/${type}/?count=${encodeURIComponent(pageSize)}${cursorParam}`,
+          `${type} page ${pageCount}`,
         );
-
-        const nextMaxId = response.next_max_id || response.nextMaxId || response?.page_info?.end_cursor || "";
-
-        if (!nextMaxId || response.has_more === false || users.length === 0) {
-          break;
-        }
-
-        maxId = nextMaxId;
-        await sleep(paceDelay(CONFIG.relationshipListDelayMs));
-      }
-
-      passes.push({
-        kind: type,
-        pass: passName,
-        count: pageSize,
-        pages: pageCount,
-        before,
-        after: usersByUsername.size,
-        added: usersByUsername.size - before,
-        status: "ended",
-      });
-
-      return { outcome: "ended", added: usersByUsername.size - before };
-    };
-
-    const stoppedResult = (stopReason, stopStatus) => ({
-      usersByUsername,
-      passes,
-      stoppedEarly: true,
-      stopReason,
-      stopStatus,
-    });
-
-    let resumeSweepEnded = false;
-
-    if (resumeCursor) {
-      const resumedSweep = await runSweep(resumePageSize, "resume", resumeCursor);
-
-      if (resumedSweep.outcome === "stopped") {
-        return stoppedResult(resumedSweep.stopReason, resumedSweep.stopStatus);
-      }
-
-      resumeSweepEnded = resumedSweep.outcome === "ended";
-    }
-
-    const totalSweeps = CONFIG.relationshipPasses * CONFIG.relationshipPageSizes.length;
-    let sweepIndex = 0;
-
-    sweeps:
-    for (let pass = 1; pass <= CONFIG.relationshipPasses; pass += 1) {
-      for (const pageSize of CONFIG.relationshipPageSizes) {
-        sweepIndex += 1;
-
-        if (options.singleSweep && (sweepIndex > 1 || resumeSweepEnded)) {
-          break sweeps;
-        }
-
-        if ((sweepIndex > 1 || resumeSweepEnded) && listIsComplete()) {
-          break sweeps;
-        }
-
-        const sweepResult = await runSweep(pageSize, `round${pass}`, "");
-
-        if (sweepResult.outcome === "stopped") {
-          return stoppedResult(sweepResult.stopReason, sweepResult.stopStatus);
-        }
-
-        if (listIsComplete()) {
-          if (sweepIndex < totalSweeps) {
-            progress(
-              `${type}: loaded all ${usersByUsername.size} of ${expectedCount} expected accounts, skipping extra passes to save requests.`,
-              type,
-            );
+      } catch (error) {
+        if (!error.authLost && !error.rateLimited && !error.relationshipBlocked) {
+          if (seededFromCursor && pageCount === 1) {
+            progress(`${type}: the saved resume position was rejected, restarting this list from the beginning.`, type);
+            seededFromCursor = false;
+            maxId = "";
+            pageCount = 0;
+            continue;
           }
 
-          break sweeps;
+          throw error;
         }
 
-        if (sweepIndex > 1 && sweepResult.added === 0) {
-          break sweeps;
-        }
+        const stopReason = error.message || String(error);
+        const stopStatus = error.rateLimited
+          ? "rate-limited"
+          : error.relationshipBlocked
+            ? "html-blocked"
+            : "auth-blocked";
 
-        if (sweepIndex < totalSweeps) {
-          await sleep(paceDelay(CONFIG.relationshipListDelayMs * 2));
-        }
+        progress(`${type} stopped early: ${stopReason}`, type);
+        passes.push({
+          kind: type,
+          pass: "round1",
+          count: pageSize,
+          pages: pageCount,
+          before,
+          after: usersByUsername.size,
+          added: usersByUsername.size - before,
+          status: stopStatus,
+        });
+        savePartial();
+
+        return {
+          usersByUsername,
+          passes,
+          stoppedEarly: true,
+          stopReason,
+          stopStatus,
+          reachedEnd: false,
+        };
       }
+
+      const users = extractUsers(response);
+      const added = addUsers(usersByUsername, users);
+
+      progress(
+        `${type}: page ${pageCount}, page users ${users.length}, added ${added}, total ${usersByUsername.size}`,
+        type,
+      );
+
+      const nextMaxId = response.next_max_id || response.nextMaxId || response?.page_info?.end_cursor || "";
+
+      if (!nextMaxId || response.has_more === false || users.length === 0) {
+        reachedEnd = true;
+        break;
+      }
+
+      maxId = nextMaxId;
+      await sleep(paceDelay(CONFIG.listDelayMs));
     }
+
+    passes.push({
+      kind: type,
+      pass: "round1",
+      count: pageSize,
+      pages: pageCount,
+      before,
+      after: usersByUsername.size,
+      added: usersByUsername.size - before,
+      status: reachedEnd ? "ended" : "page-cap",
+    });
 
     if (CONFIG.resume) {
       resume.lists[type] = {
-        complete: typeof expectedCount !== "number" || usersByUsername.size >= expectedCount,
+        complete: reachedEnd && (typeof expectedCount !== "number" || usersByUsername.size >= expectedCount),
         accounts: [...usersByUsername.values()],
         maxId: "",
-        pageSize: 0,
+        pageSize,
       };
       saveResumeState(target.id, resume);
     }
@@ -832,6 +759,7 @@
       stoppedEarly: false,
       stopReason: "",
       stopStatus: "",
+      reachedEnd,
     };
   }
 
@@ -846,7 +774,7 @@
     for (const baseUrl of baseUrls) {
       let maxId = "";
 
-      for (let page = 1; page <= CONFIG.exactSearchMaxPages; page += 1) {
+      for (let page = 1; page <= CONFIG.verifyMaxPages; page += 1) {
         const cursorParam = maxId ? `&max_id=${encodeURIComponent(maxId)}` : "";
         const response = await getJson(`${baseUrl}${cursorParam}`, `exact follower search @${username}`);
         const users = extractUsers(response);
@@ -864,13 +792,13 @@
           break;
         }
 
-        if (page === CONFIG.exactSearchMaxPages) {
+        if (page === CONFIG.verifyMaxPages) {
           truncated = true;
           break;
         }
 
         maxId = nextMaxId;
-        await sleep(paceDelay(CONFIG.exactSearchDelayMs));
+        await sleep(paceDelay(CONFIG.verifyDelayMs));
       }
     }
 
@@ -881,20 +809,6 @@
     }
 
     return false;
-  }
-
-  async function batchFriendshipStatuses(accounts) {
-    const ids = accounts.map((account) => account.id).join(",");
-    const response = await getJson(
-      "/api/v1/friendships/show_many/",
-      `friendship batch (${accounts.length} accounts)`,
-      {
-        method: "POST",
-        body: `user_ids=${encodeURIComponent(ids)}`,
-      },
-    );
-
-    return response?.friendship_statuses || null;
   }
 
   function resultLines(results) {
@@ -909,6 +823,10 @@
     return `<div class="card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
   }
 
+  function section(title, accounts, columns) {
+    return `<h2>${escapeHtml(title)} (${accounts.length})</h2><ol class="${columns ? "cols" : ""}">${resultLines(accounts)}</ol>`;
+  }
+
   function renderFinalReport(result) {
     const warningItems = result.warnings.length
       ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
@@ -919,15 +837,26 @@
         <td>${escapeHtml(pass.pass)}</td>
         <td>${escapeHtml(pass.count)}</td>
         <td>${escapeHtml(pass.pages)}</td>
-        <td>${escapeHtml(pass.before)}</td>
         <td>${escapeHtml(pass.after)}</td>
         <td>${escapeHtml(pass.added)}</td>
         <td>${escapeHtml(pass.status)}</td>
       </tr>
     `).join("");
+    const unconfirmedSection = result.unconfirmed.length
+      ? section("Not following back - unconfirmed", result.unconfirmed, true)
+      : "";
+    const rescuedSection = result.rescued.length
+      ? section("Actually follows back - removed from misses", result.rescued, true)
+      : "";
+    const unknownSection = result.unknown.length
+      ? section("Unknown - verification blocked", result.unknown, false)
+      : "";
+    const bonusSection = result.fansNotFollowedBack
+      ? section("Bonus: followers you (the target) do not follow back", result.fansNotFollowedBack, true)
+      : "";
 
-    document.getElementById("ig-follow-back-progress-box")?.remove?.();
-    document.title = `Instagram follow-back result - @${result.target.username}`;
+    document.getElementById("ig-non-followers-progress-box")?.remove?.();
+    document.title = `Instagram non-followers - @${result.target.username}`;
     document.body.innerHTML = `
       <style>
         body { margin: 24px; background: #f8fafc; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -946,33 +875,32 @@
         th, td { padding: 8px 10px; border: 1px solid #dbe3ef; text-align: left; }
         code { background: #e2e8f0; border-radius: 4px; padding: 2px 5px; }
       </style>
-      <h1>Instagram follow-back result: @${escapeHtml(result.target.username)}</h1>
-      <p>Only accounts in <strong>Verified not following back</strong> are counted as misses. Every tentative miss was verified with ${escapeHtml(result.verificationMethod)}; accounts that actually follow back were removed, and failures or auth issues are kept in Unknown instead of being counted.</p>
-      <p><strong>Verification method:</strong> ${escapeHtml(result.verificationMethod)}</p>
+      <h1>Instagram non-followers: @${escapeHtml(result.target.username)}</h1>
+      <p>Accounts @${escapeHtml(result.target.username)} follows that do <strong>not</strong> follow back. "Confirmed" is exact: the follower list was read completely, so the difference is definitive. ${result.unconfirmed.length ? "\"Unconfirmed\" accounts could not be proven because Instagram did not expose the full follower list - rerun later to confirm them." : ""}</p>
+      <p><strong>Follower list read:</strong> ${escapeHtml(result.followerListComplete ? "complete (exact result)" : "incomplete (some accounts unconfirmed)")} | <strong>Verification:</strong> ${escapeHtml(result.verificationMode)}</p>
       <div class="grid">
         ${statCard("Profile following", result.profileCounts.following)}
         ${statCard("Loaded following", result.loaded.following)}
         ${statCard("Profile followers", result.profileCounts.followers)}
         ${statCard("Loaded followers", result.loaded.followers)}
-        ${statCard("Tentative misses checked", result.tentativeMisses)}
-        ${statCard("Verified not following back", result.verifiedNotFollowingBack.length)}
-        ${statCard("Follows back (corrected)", result.correctedByExactSearch.length)}
-        ${statCard("Unknown, excluded", result.unknown.length)}
+        ${statCard("Not following back (confirmed)", result.confirmed.length)}
+        ${statCard("Unconfirmed", result.unconfirmed.length)}
+        ${statCard("Follows back (removed)", result.rescued.length)}
+        ${statCard("Unknown", result.unknown.length)}
         ${statCard("Requests made", result.requestsMade)}
       </div>
       <div class="warn"><strong>Warnings</strong><ul>${warningItems}</ul></div>
-      <h2>Verified not following back (${result.verifiedNotFollowingBack.length})</h2>
-      <ol class="cols">${resultLines(result.verifiedNotFollowingBack)}</ol>
-      <h2>Unknown - not counted (${result.unknown.length})</h2>
-      <ol>${resultLines(result.unknown)}</ol>
-      <h2>Follows back - corrected (${result.correctedByExactSearch.length})</h2>
-      <ol class="cols">${resultLines(result.correctedByExactSearch)}</ol>
+      ${section("Not following back - confirmed", result.confirmed, true)}
+      ${unconfirmedSection}
+      ${rescuedSection}
+      ${unknownSection}
+      ${bonusSection}
       <h2>Load passes</h2>
       <table>
-        <thead><tr><th>Kind</th><th>Pass</th><th>Count</th><th>Pages</th><th>Before</th><th>After</th><th>Added</th><th>Status</th></tr></thead>
+        <thead><tr><th>Kind</th><th>Pass</th><th>Count</th><th>Pages</th><th>Total</th><th>Added</th><th>Status</th></tr></thead>
         <tbody>${passRows}</tbody>
       </table>
-      <p>Full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
+      <p>Full structured results are in <code>window.IG_NON_FOLLOWERS_RESULTS</code> until this page is reloaded.</p>
     `;
   }
 
@@ -992,31 +920,23 @@
       "profile",
     );
 
-    const viewerId = getCookie("ds_user_id");
-    const batchVerification = Boolean(
-      CONFIG.batchVerify
-      && viewerId
-      && viewerId === target.id
-      && getCookie("csrftoken"),
-    );
-    const verificationMethod = batchVerification
-      ? "exact batch friendship checks"
-      : "exact follower search";
-    const resume = loadResumeState(target.id);
     const warnings = [];
+
+    if (getCookie("ds_user_id") && getCookie("ds_user_id") === target.id) {
+      warnings.push("This is your own account. check-follow-back.js is faster for your own account because it can use Instagram's batch friendship endpoint; this public script still works but reads more pages.");
+    }
+
+    if (target.isPrivate && !target.followedByViewer) {
+      throw new Error(`@${target.username} is private and you do not follow them, so Instagram will not expose their follower/following lists. Follow them (or use an account that does) and rerun.`);
+    }
+
+    const resume = loadResumeState(target.id);
 
     if (
       resume.loadedFromStorage
       && (Object.keys(resume.lists).length > 0 || Object.keys(resume.verdicts).length > 0)
     ) {
-      warnings.push(`Reused saved progress from ${resume.ageMinutes} minutes ago to avoid repeating requests. For a fully fresh scan, run with window.IG_FOLLOW_BACK_CONFIG = { resume: false }.`);
-    }
-
-    if (batchVerification) {
-      progress(
-        "You are checking your own account: tentative misses will be verified with exact batch friendship checks (far fewer requests).",
-        "profile",
-      );
+      warnings.push(`Reused saved progress from ${resume.ageMinutes} minutes ago to avoid repeating requests. For a fully fresh scan, run with window.IG_NON_FOLLOWERS_CONFIG = { resume: false }.`);
     }
 
     const followingLoad = await loadRelationshipList("following", target, resume);
@@ -1026,33 +946,6 @@
       && (typeof target.followingCount !== "number" || target.followingCount > 0)
     );
 
-    const skipFollowerList = batchVerification && (
-      CONFIG.skipFollowerListWhenSelf === true
-      || (
-        CONFIG.skipFollowerListWhenSelf === "auto"
-        && typeof target.followerCount === "number"
-        && typeof target.followingCount === "number"
-        && target.followerCount > target.followingCount * 2
-      )
-    );
-    const skippedFollowerLoad = (status) => ({
-      usersByUsername: new Map(),
-      passes: [{
-        kind: "followers",
-        pass: "skipped",
-        count: "-",
-        pages: 0,
-        before: 0,
-        after: 0,
-        added: 0,
-        status,
-      }],
-      stoppedEarly: false,
-      stopReason: "",
-      stopStatus: "",
-      skipped: true,
-    });
-
     let followerLoad;
 
     if (followingListUnavailable) {
@@ -1060,260 +953,213 @@
         "Skipping the follower list: the following list was blocked before any accounts loaded, so this run cannot produce a result anyway.",
         "followers",
       );
-      followerLoad = skippedFollowerLoad("skipped (following list blocked)");
-    } else if (skipFollowerList) {
-      progress(
-        `Skipping the bulk follower list (${formatNumber(target.followerCount)} followers): every followed account is verified directly with batch friendship checks, which needs far fewer requests.`,
-        "followers",
-      );
-      followerLoad = skippedFollowerLoad("skipped (batch verification)");
+      followerLoad = {
+        usersByUsername: new Map(),
+        passes: [{ kind: "followers", pass: "skipped", count: "-", pages: 0, before: 0, after: 0, added: 0, status: "skipped (following blocked)" }],
+        stoppedEarly: false,
+        stopReason: "",
+        stopStatus: "",
+        reachedEnd: false,
+        skipped: true,
+      };
     } else {
-      followerLoad = await loadRelationshipList("followers", target, resume, { singleSweep: batchVerification });
+      followerLoad = await loadRelationshipList("followers", target, resume);
     }
 
     const followerListUnavailable = (
-      !batchVerification
-      && followerLoad.stoppedEarly
+      followerLoad.stoppedEarly
       && followerLoad.usersByUsername.size === 0
       && (typeof target.followerCount !== "number" || target.followerCount > 0)
     );
-    const tentativeMisses = followerListUnavailable || followingListUnavailable
-      ? []
-      : [...followingLoad.usersByUsername.values()]
-        .filter((account) => !followerLoad.usersByUsername.has(normalizeUsername(account.username)))
-        .sort((left, right) => left.username.localeCompare(right.username));
-    const verifiedNotFollowingBack = [];
-    const correctedByExactSearch = [];
+
+    const confirmed = [];
+    const unconfirmed = [];
+    const rescued = [];
     const unknown = [];
+    let verificationMode = "none (complete follower list, exact difference)";
+    let followerListComplete = false;
     let authLost = false;
 
-    if (followerListUnavailable || followingListUnavailable) {
+    if (followingListUnavailable || followerListUnavailable) {
       progress(
-        "Stopped safely before exact verification because Instagram blocked a required relationship list. No accounts were counted.",
+        "Stopped safely because Instagram blocked a required list before enough data loaded. No accounts were counted.",
         "blocked",
       );
+      verificationMode = "stopped before verification";
     } else {
-      progress(
-        `Verifying ${tentativeMisses.length} tentative misses with ${verificationMethod}. Unknowns will not be counted as not following back.`,
-        "exact verification",
+      const tentativeMisses = [...followingLoad.usersByUsername.values()]
+        .filter((account) => !followerLoad.usersByUsername.has(normalizeUsername(account.username)))
+        .sort((left, right) => left.username.localeCompare(right.username));
+
+      followerListComplete = Boolean(
+        followerLoad.reachedEnd
+        && (
+          typeof target.followerCount !== "number"
+          || followerLoad.usersByUsername.size >= target.followerCount * CONFIG.completenessTolerance
+        ),
       );
 
-      const recordVerdict = (account, followsBack) => {
-        (followsBack ? correctedByExactSearch : verifiedNotFollowingBack).push(account);
-        resume.verdicts[verdictKey(account)] = { followsBack };
-      };
-      const pendingVerification = [];
-      let resumedVerdicts = 0;
+      const shouldVerify = tentativeMisses.length > 0 && (
+        CONFIG.verifyMisses === true
+        || (CONFIG.verifyMisses === "auto" && !followerListComplete)
+      );
 
-      for (const account of tentativeMisses) {
-        const savedVerdict = resume.verdicts[verdictKey(account)];
-
-        if (savedVerdict && typeof savedVerdict.followsBack === "boolean") {
-          (savedVerdict.followsBack ? correctedByExactSearch : verifiedNotFollowingBack).push(account);
-          resumedVerdicts += 1;
+      if (!shouldVerify) {
+        if (followerListComplete) {
+          confirmed.push(...tentativeMisses);
+          verificationMode = "none needed (follower list complete)";
         } else {
-          pendingVerification.push(account);
+          unconfirmed.push(...tentativeMisses);
+          verificationMode = CONFIG.verifyMisses === false
+            ? "skipped by config (verifyMisses=false)"
+            : "skipped";
         }
-      }
+      } else {
+        verificationMode = "exact follower search (paced, abort-on-block)";
 
-      if (resumedVerdicts > 0) {
-        progress(
-          `Reused ${resumedVerdicts} verified results from the previous run, ${pendingVerification.length} still to check.`,
-          "exact verification",
-        );
-      }
+        const recordVerdict = (account, followsBack) => {
+          (followsBack ? rescued : confirmed).push(account);
+          resume.verdicts[verdictKey(account)] = { followsBack };
+        };
+        const pending = [];
+        let resumedVerdicts = 0;
 
-      let pendingExactSearch = pendingVerification;
+        for (const account of tentativeMisses) {
+          const savedVerdict = resume.verdicts[verdictKey(account)];
 
-      if (batchVerification && pendingVerification.length > 0) {
-        const withIds = pendingVerification.filter((account) => account.id);
-        const exactFallback = pendingVerification.filter((account) => !account.id);
-
-        for (let index = 0; index < withIds.length; index += CONFIG.batchSize) {
-          const batchAccounts = withIds.slice(index, index + CONFIG.batchSize);
-
-          if (authLost && CONFIG.stopExactSearchOnAuthLost) {
-            for (const account of batchAccounts) {
-              unknown.push({
-                ...account,
-                reason: "Login or rate-limit wall appeared before this batch was checked.",
-              });
-            }
-            continue;
+          if (savedVerdict && typeof savedVerdict.followsBack === "boolean") {
+            (savedVerdict.followsBack ? rescued : confirmed).push(account);
+            resumedVerdicts += 1;
+          } else {
+            pending.push(account);
           }
+        }
+
+        if (resumedVerdicts > 0) {
+          progress(`Reused ${resumedVerdicts} verified results from the previous run, ${pending.length} still to check.`, "verification");
+        }
+
+        let toVerify = pending;
+
+        if (pending.length > 0 && followerLoad.usersByUsername.size > 0) {
+          const canary = followerLoad.usersByUsername.values().next().value;
+          let canaryProblem = "";
 
           try {
-            const statuses = await batchFriendshipStatuses(batchAccounts);
-
-            for (const account of batchAccounts) {
-              const status = statuses ? statuses[account.id] : null;
-
-              if (status && typeof status.followed_by === "boolean") {
-                recordVerdict(account, status.followed_by);
-              } else {
-                exactFallback.push(account);
-              }
+            if (!(await exactFollowerSearch(target, canary.username))) {
+              canaryProblem = `Exact follower search could not find @${canary.username}, a known follower, so search results are not reliable right now.`;
             }
           } catch (error) {
             if (error.authLost || error.rateLimited || error.relationshipBlocked) {
               authLost = true;
+            }
 
-              for (const account of batchAccounts) {
-                unknown.push({
-                  ...account,
-                  reason: error.message || String(error),
-                });
-              }
+            canaryProblem = `Exact follower search reliability check failed: ${error.message || String(error)}`;
+          }
+
+          if (canaryProblem) {
+            progress(canaryProblem, "verification");
+            warnings.push(`${canaryProblem} Accounts that could not be confirmed were left as Unconfirmed instead of being counted. Wait 15-30 minutes and rerun.`);
+            unconfirmed.push(...pending);
+            toVerify = [];
+          } else {
+            await sleep(paceDelay(CONFIG.verifyDelayMs));
+          }
+        }
+
+        if (toVerify.length > CONFIG.maxVerifications) {
+          const overflow = toVerify.slice(CONFIG.maxVerifications);
+
+          unconfirmed.push(...overflow);
+          warnings.push(`${overflow.length} accounts were left Unconfirmed to stay under the ${CONFIG.maxVerifications}-verification safety cap. Rerun later to confirm them; saved progress means the rerun continues where this one stopped.`);
+          toVerify = toVerify.slice(0, CONFIG.maxVerifications);
+        }
+
+        for (let index = 0; index < toVerify.length; index += 1) {
+          const account = toVerify[index];
+
+          if (authLost) {
+            unconfirmed.push(account);
+            continue;
+          }
+
+          try {
+            recordVerdict(account, await exactFollowerSearch(target, account.username));
+          } catch (error) {
+            if (error.authLost || error.rateLimited || error.relationshipBlocked) {
+              authLost = true;
+              unknown.push({ ...account, reason: error.message || String(error) });
+            } else if (error.searchTruncated) {
+              unconfirmed.push(account);
             } else {
-              exactFallback.push(...batchAccounts);
+              unknown.push({ ...account, reason: error.message || String(error) });
             }
           }
 
-          progress(
-            `Batch checked ${Math.min(index + CONFIG.batchSize, withIds.length)}/${withIds.length}: follows back ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
-            "exact verification",
-          );
-          saveResumeState(target.id, resume);
-
-          if (index + CONFIG.batchSize < withIds.length) {
-            await sleep(paceDelay(CONFIG.batchDelayMs));
-          }
-        }
-
-        if (exactFallback.length > 0) {
-          progress(
-            `Falling back to exact follower search for ${exactFallback.length} accounts the batch check could not resolve.`,
-            "exact verification",
-          );
-        }
-
-        pendingExactSearch = exactFallback;
-      }
-
-      if (
-        pendingExactSearch.length > 0
-        && followerLoad.usersByUsername.size > 0
-        && !(authLost && CONFIG.stopExactSearchOnAuthLost)
-      ) {
-        const canary = followerLoad.usersByUsername.values().next().value;
-        let canaryProblem = "";
-
-        try {
-          if (!(await exactFollowerSearch(target, canary.username))) {
-            canaryProblem = `Exact follower search could not find @${canary.username}, a known follower, so search results are not reliable right now.`;
-          }
-        } catch (error) {
-          if (error.authLost || error.rateLimited || error.relationshipBlocked) {
-            authLost = true;
+          if ((index + 1) % 5 === 0 || index + 1 === toVerify.length) {
+            progress(
+              `Verified ${index + 1}/${toVerify.length}: confirmed ${confirmed.length}, follows back ${rescued.length}, unconfirmed ${unconfirmed.length}, unknown ${unknown.length}`,
+              "verification",
+            );
+            saveResumeState(target.id, resume);
           }
 
-          canaryProblem = `Exact follower search reliability check failed: ${error.message || String(error)}`;
-        }
-
-        if (canaryProblem) {
-          progress(canaryProblem, "exact verification");
-          warnings.push(`${canaryProblem} Unverified accounts were kept in Unknown instead of being counted as not following back. Wait 10-15 minutes and rerun.`);
-
-          for (const account of pendingExactSearch) {
-            unknown.push({ ...account, reason: canaryProblem });
+          if (index + 1 < toVerify.length && !authLost) {
+            await sleep(paceDelay(CONFIG.verifyDelayMs));
           }
-
-          pendingExactSearch = [];
-        } else {
-          await sleep(paceDelay(CONFIG.exactSearchDelayMs));
         }
       }
+    }
 
-      for (let index = 0; index < pendingExactSearch.length; index += 1) {
-        const account = pendingExactSearch[index];
+    let fansNotFollowedBack = null;
 
-        if (authLost && CONFIG.stopExactSearchOnAuthLost) {
-          unknown.push({
-            ...account,
-            reason: "Login or rate-limit wall appeared before exact search.",
-          });
-          continue;
-        }
-
-        try {
-          recordVerdict(account, await exactFollowerSearch(target, account.username));
-        } catch (error) {
-          if (error.authLost || error.rateLimited || error.relationshipBlocked) {
-            authLost = true;
-          }
-
-          unknown.push({
-            ...account,
-            reason: error.message || String(error),
-          });
-        }
-
-        if ((index + 1) % 10 === 0 || index + 1 === pendingExactSearch.length) {
-          progress(
-            `Exact checked ${index + 1}/${pendingExactSearch.length}: follows back ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
-            "exact verification",
-          );
-          saveResumeState(target.id, resume);
-        }
-
-        if (index + 1 < pendingExactSearch.length) {
-          await sleep(paceDelay(CONFIG.exactSearchDelayMs));
-        }
-      }
+    if (
+      !followingListUnavailable
+      && !followerListUnavailable
+      && followingLoad.reachedEnd
+      && followerLoad.reachedEnd
+      && !followerLoad.skipped
+    ) {
+      fansNotFollowedBack = [...followerLoad.usersByUsername.values()]
+        .filter((account) => !followingLoad.usersByUsername.has(normalizeUsername(account.username)))
+        .sort((left, right) => left.username.localeCompare(right.username));
     }
 
     if (followingLoad.stoppedEarly) {
-      warnings.push(`Following list stopped early: ${followingLoad.stopReason}. Loaded accounts were kept, but accounts Instagram did not expose cannot be checked in this run. Wait 10-15 minutes and rerun: saved progress is reused, so the rerun only requests what is still missing.`);
+      warnings.push(`Following list stopped early: ${followingLoad.stopReason}. Wait 15-30 minutes and rerun; saved progress is reused so the rerun only requests what is still missing.`);
     }
 
     if (followerLoad.stoppedEarly) {
-      if (batchVerification) {
-        warnings.push(`Followers list stopped early: ${followerLoad.stopReason}. Accuracy is unaffected: every tentative miss was still verified directly with batch friendship checks.`);
-      } else {
-        warnings.push(`Followers list stopped early: ${followerLoad.stopReason}. No false positives were counted from the blocked data.`);
-      }
-
-      if (followerLoad.stopStatus === "html-blocked" && !batchVerification) {
-        warnings.push("Instagram returned an HTML page instead of follower JSON for this profile/session. That is the same follower-side wall the Instagram modal can show as empty or suggested accounts; rerun only after the follower modal can show real followers.");
-      }
+      warnings.push(`Followers list stopped early: ${followerLoad.stopReason}. No false positives were counted from the blocked data.`);
     }
 
     if (followingListUnavailable || followerListUnavailable) {
-      warnings.push("No reliable not-following-back result was produced because Instagram blocked a required list before enough data loaded. Wait 10-15 minutes, refresh the profile, and rerun: saved progress is reused so the rerun is much lighter.");
-    }
-
-    if (
-      typeof target.followingCount === "number"
-      && followingLoad.usersByUsername.size < target.followingCount
-      && !followingListUnavailable
-    ) {
-      warnings.push(`Bulk following list exposed ${followingLoad.usersByUsername.size} of ${target.followingCount}. The verified list has no known false positives, but it may miss not-followbacks among accounts Instagram did not expose.`);
-    }
-
-    if (
-      !batchVerification
-      && !followerLoad.skipped
-      && typeof target.followerCount === "number"
-      && followerLoad.usersByUsername.size < target.followerCount
-      && !followerListUnavailable
-    ) {
-      warnings.push(`Bulk followers list exposed ${followerLoad.usersByUsername.size} of ${target.followerCount}. Each tentative miss was exact-searched in followers; exact-search hits were corrected, and exact-search failures were moved to Unknown.`);
+      warnings.push("No reliable result was produced because Instagram blocked a required list. This is the action-block Instagram shows when it sees automated list loading. Wait 15-30 minutes, reopen the profile, and rerun: the script reuses saved progress and paces itself more slowly after a block.");
+    } else if (!followerListComplete && !authLost) {
+      warnings.push(`The follower list could not be read in full (loaded ${followerLoad.usersByUsername.size} of ${formatNumber(target.followerCount)}). Confirmed accounts are still exact; Unconfirmed accounts may actually follow back. Rerun later to resolve them.`);
     }
 
     if (authLost) {
-      warnings.push("Login, HTML, or rate-limit wall appeared during exact verification; affected accounts were moved to Unknown instead of counted. Wait 10-15 minutes and rerun: verified results were saved, so the rerun only checks the Unknown accounts.");
+      warnings.push("An action block appeared during verification, so remaining accounts were left Unconfirmed rather than risk a longer block. Wait 15-30 minutes and rerun: verified results were saved.");
     }
 
-    if (
+    const cleanRun = (
       !followingLoad.stoppedEarly
       && !followerLoad.stoppedEarly
       && !authLost
       && unknown.length === 0
-    ) {
+      && unconfirmed.length === 0
+    );
+
+    if (cleanRun) {
       clearResumeState(target.id);
     } else {
       saveResumeState(target.id, resume);
     }
+
+    confirmed.sort((left, right) => left.username.localeCompare(right.username));
+    unconfirmed.sort((left, right) => left.username.localeCompare(right.username));
+    rescued.sort((left, right) => left.username.localeCompare(right.username));
 
     const result = {
       generatedAt: new Date().toISOString(),
@@ -1326,36 +1172,36 @@
         followers: followerLoad.skipped ? "skipped" : followerLoad.usersByUsername.size,
         following: followingLoad.usersByUsername.size,
       },
-      tentativeMisses: tentativeMisses.length,
-      verifiedNotFollowingBack,
-      correctedByExactSearch,
+      followerListComplete,
+      verificationMode,
+      confirmed,
+      unconfirmed,
+      rescued,
       unknown,
+      fansNotFollowedBack,
       authLost,
       warnings,
-      verificationMethod,
       requestsMade: state.requests,
       resumedFromPreviousRun: resume.loadedFromStorage,
       loadPasses: [...followingLoad.passes, ...followerLoad.passes],
-      accuracyNote: "Only accounts in Verified not following back are counted as misses. Every tentative miss is individually verified; accounts that follow back are removed, and failures/auth issues are kept in Unknown instead of being counted.",
+      accuracyNote: "Confirmed = the follower list was read completely (or each miss individually verified), so it is exact. Unconfirmed = the follower list was incomplete and the account could not be proven; it is never counted as a definite non-follower.",
     };
 
-    window.IG_FOLLOW_BACK_RESULTS = result;
-    window.IG_OVER1K_FOLLOW_BACK_RESULTS = result;
+    window.IG_NON_FOLLOWERS_RESULTS = result;
     state.done = true;
     progress(
-      `Done: ${verifiedNotFollowingBack.length} verified not following back, ${correctedByExactSearch.length} follow back, ${unknown.length} unknown, ${state.requests} requests.`,
+      `Done: ${confirmed.length} confirmed not following back, ${unconfirmed.length} unconfirmed, ${rescued.length} follow back, ${unknown.length} unknown, ${state.requests} requests.`,
       "done",
     );
-    console.log("IG_FOLLOW_BACK_RESULT_SUMMARY", {
+    console.log("IG_NON_FOLLOWERS_SUMMARY", {
       target: result.target.username,
       loaded: result.loaded,
       profileCounts: result.profileCounts,
-      tentativeMisses: result.tentativeMisses,
-      verifiedNotFollowingBack: result.verifiedNotFollowingBack.length,
-      correctedByExactSearch: result.correctedByExactSearch.length,
+      followerListComplete: result.followerListComplete,
+      confirmed: result.confirmed.length,
+      unconfirmed: result.unconfirmed.length,
+      rescued: result.rescued.length,
       unknown: result.unknown.length,
-      authLost: result.authLost,
-      verificationMethod: result.verificationMethod,
       requestsMade: result.requestsMade,
       warnings: result.warnings,
     });
@@ -1365,6 +1211,6 @@
   run().catch((error) => {
     state.done = true;
     progress(error.message || String(error), "error");
-    console.error("Instagram follow-back checker failed", error);
+    console.error("Instagram non-follower checker failed", error);
   });
 })();

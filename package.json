@@ -1,7 +1,7 @@
 {
   "name": "instagram-follow-back-checker",
-  "version": "1.1.1",
-  "description": "A browser script that checks which Instagram accounts do not follow back with exact-search verification.",
+  "version": "1.3.0",
+  "description": "Browser scripts that check which Instagram accounts do not follow back, for your own account or any account you can view, with exact verification and rate-limit-safe pacing.",
   "author": "dongt10",
   "license": "MIT",
   "repository": {
@@ -12,7 +12,7 @@
   "private": false,
   "scripts": {
     "build:bookmarklet": "node scripts/build-bookmarklet.mjs",
-    "check": "node --check src/check-follow-back.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-exact-search.mjs && node scripts/verify-rate-limit-wall.mjs"
+    "check": "node --check src/check-follow-back.js && node --check src/check-non-followers-public.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-exact-search.mjs && node scripts/verify-batch-self.mjs && node scripts/verify-rate-limit-wall.mjs && node scripts/verify-html-wall.mjs && node scripts/verify-public.mjs && node scripts/simulate-scale.mjs && node scripts/simulate-public-scale.mjs"
   },
   "keywords": [
     "instagram",

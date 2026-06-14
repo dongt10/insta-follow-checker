@@ -41,7 +41,7 @@ if (!source.includes("correctedByExactSearch")) {
   throw new Error("source script must report tentative misses corrected by exact follower search");
 }
 
-if (!source.includes("unknown")) {
+if (!source.includes("unknown.push")) {
   throw new Error("source script must keep auth/rate-limit failures out of verified misses");
 }
 
