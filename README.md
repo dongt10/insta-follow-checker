@@ -1,6 +1,6 @@
-# Instagram Follow Back Checker
+# Insta Follow Checker
 
-Browser scripts that check which Instagram accounts do not follow back, with per-account verification so the result is exact, and adaptive pacing so they do not overload Instagram or trip the action block.
+Browser scripts that check which Instagram accounts do not follow back, with exact verification when Instagram exposes enough relationship data and conservative "unknown" or "unconfirmed" results when it does not.
 
 By [dongt10](https://github.com/dongt10).
 
@@ -11,7 +11,7 @@ There are two scripts because checking your own account and checking someone els
 | You are checking | Use | Why |
 | --- | --- | --- |
 | **Your own account** | [src/check-follow-back.js](src/check-follow-back.js) | Can use Instagram's batch friendship endpoint (`show_many`) — a definitive answer for ~25 accounts per request. Fastest and exact. |
-| **Anyone else's account** you can view (public, or private you follow) | [src/check-non-followers-public.js](src/check-non-followers-public.js) | `show_many` only reports relationships relative to *you*, so it cannot answer "does X follow Isaac". This script reads the target's follower list once, gently, and takes the exact difference — and avoids the per-account search storm that triggers Instagram's action block. |
+| **Anyone else's account** you can view (public, or private you follow) | [src/check-non-followers-public.js](src/check-non-followers-public.js) | `show_many` only reports relationships relative to *you*, so it cannot answer whether one other account follows another. This script reads the target's follower list once, gently, and takes the exact difference, avoiding the per-account search storm that triggers Instagram's action block. |
 
 You do **not** need the target's password. You only need to be able to see their followers and following from your own logged-in account.
 
@@ -103,6 +103,19 @@ If you see a warning like `rate-limit wall (200)`, Instagram returned a temporar
 If you see `HTML/non-JSON wall (200)` on the followers list, Instagram served the normal website HTML instead of follower JSON for that profile/session. This can happen even while the following list still loads, and the Instagram follower modal may also show an empty/suggested-accounts state. When checking someone else's profile, the script stops with zero verified misses because it cannot prove who follows back until Instagram exposes real follower data again. When checking your own account, this wall does not affect accuracy because the batch friendship check answers directly.
 
 The final report also keeps the full structured result in `window.IG_FOLLOW_BACK_RESULTS` and `window.IG_OVER1K_FOLLOW_BACK_RESULTS` until the page is reloaded.
+
+## Limits and known problems
+
+The commit history shows this script has mostly evolved around avoiding false positives and avoiding Instagram action blocks. The current scripts are careful, but they still have real limits:
+
+- They depend on Instagram's private web endpoints and page data. Instagram can change those APIs, cookies, response shapes, or rate-limit behavior without warning.
+- They only work from a signed-in browser session that can already view the target profile's follower and following lists. Private, blocked, restricted, or temporarily hidden lists cannot be bypassed.
+- Large lists can be incomplete because of stale counts, unavailable accounts, pagination quirks, or Instagram returning HTML instead of JSON. The scripts try to verify tentative misses before counting them, but blocked data can still leave accounts in `Unknown` or `Unconfirmed`.
+- Self-checks are the most reliable path because `show_many` can answer whether each account follows you back. Other-account checks cannot use that endpoint for the target account, so they rely on follower-list reads and limited exact searches.
+- The public/other-account script is intentionally slower and may stop early. That is by design: earlier per-account search patterns could trigger "We limit how often you can do certain things" blocks, so unresolved accounts are parked for a later rerun instead of being forced through.
+- Lowering the delays or verification caps can make the run faster, but it also increases the chance of temporary blocks, logout prompts, and incomplete results.
+- Saved progress is only a local browser snapshot with a 1 hour default TTL. It helps resume interrupted runs, but the result can still become stale if accounts follow, unfollow, deactivate, or change privacy during or after the scan.
+- The scripts do not run on Instagram's behalf as an approved integration. Treat them as inspectable browser-console utilities, not a guaranteed long-term API client.
 
 ## Checking someone else's account (public script)
 

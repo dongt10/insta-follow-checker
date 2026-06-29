@@ -1,12 +1,12 @@
 {
-  "name": "instagram-follow-back-checker",
+  "name": "insta-follow-checker",
   "version": "1.3.0",
-  "description": "Browser scripts that check which Instagram accounts do not follow back, for your own account or any account you can view, with exact verification and rate-limit-safe pacing.",
+  "description": "Browser scripts for checking Instagram follow-backs with exact results when relationship data is visible and conservative unknowns when Instagram blocks data.",
   "author": "dongt10",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dongt10/instagram-follow-back-checker.git"
+    "url": "https://github.com/dongt10/insta-follow-checker.git"
   },
   "type": "module",
   "private": false,
