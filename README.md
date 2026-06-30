@@ -4,6 +4,16 @@ Browser scripts that check which Instagram accounts do not follow back, with exa
 
 By [dongt10](https://github.com/dongt10).
 
+## Easy Copy
+
+Open [copy.html](copy.html) in a browser for one-click copy buttons. If you are viewing this on GitHub, download the repo or open a rendered/static-hosted copy of `copy.html`; GitHub's file viewer shows HTML source instead of running the page.
+
+- **Self-check console script** for your own account.
+- **Public-account console script** for another visible account.
+- Matching bookmarklets for both scripts.
+
+Raw fallback links: [self-check script](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/src/check-follow-back.js), [public-account script](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/src/check-non-followers-public.js), [self-check bookmarklet](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/bookmarklet.js), [public-account bookmarklet](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/bookmarklet-public.js).
+
 ## Which script to use
 
 There are two scripts because checking your own account and checking someone else's account have fundamentally different, and conflicting, request patterns. Using the right one keeps each fast and block-safe.
@@ -38,7 +48,7 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 3. Open DevTools Console:
    - macOS: `Command + Option + J`
    - Windows/Linux: `Ctrl + Shift + J`
-4. Paste the script from [src/check-follow-back.js](src/check-follow-back.js).
+4. Copy the self-check script from [copy.html](copy.html), or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
 5. Press Enter.
 
 The page shows a progress overlay (including a live request count and current pacing) while it loads relationship lists and verifies tentative misses. When it finishes, the page is replaced with a result report.
@@ -74,6 +84,8 @@ window.IG_FOLLOW_BACK_CONFIG = {
   maxIndividualRechecks: 80,        // safety cap so a broken batch response does not trigger hundreds of single checks
   previousUnknownUsernames: [],      // optional usernames from a prior Unknown list to prioritize one-by-one
   skipFollowerListWhenSelf: "auto", // skip bulk followers only when it is much larger than following (true, "auto", false)
+  includeFollowingStatusHints: true, // use Instagram's follows_viewer hint as extra self-check candidates
+  compareFollowingFeed: false,      // self-check only: also scan the GraphQL following feed used by simpler tools
   resume: true,                    // reuse saved list progress from interrupted runs
   resumeTtlMs: 3600000,            // how long saved progress stays valid (1 hour)
   reverifySavedMisses: true,        // cross-check saved not-following-back verdicts before reporting
@@ -86,7 +98,7 @@ For large accounts, avoid setting delays too low. Instagram can rate-limit or lo
 
 ## Bookmarklet
 
-If you prefer a bookmarklet, use the one-line version in [bookmarklet.js](bookmarklet.js).
+If you prefer a bookmarklet, copy it from [copy.html](copy.html) or use the one-line version in [bookmarklet.js](bookmarklet.js).
 
 Create a new bookmark, paste the contents of `bookmarklet.js` into the URL field, then click that bookmark while you are on the Instagram profile page you want to check.
 
@@ -97,6 +109,8 @@ Instagram may show profile counts that differ from the loaded list counts becaus
 To be exact down to the last account, the script never trusts the bulk comparison by itself:
 
 - On your own account, every tentative miss is checked with Instagram's batch friendship-status endpoint first. If the batch endpoint withholds a status, the script rechecks those unresolved accounts one by one before leaving them Unknown.
+- On your own account, the script also preserves Instagram's `follows_viewer` hint from the following feed and uses it as an extra source of candidates to verify. This is the signal many simpler unfollower scripts count directly, so the final report shows it separately when it disagrees with verified results.
+- If you want to compare directly against those simpler tools, set `window.IG_FOLLOW_BACK_CONFIG = { compareFollowingFeed: true }` before running. This adds a slower self-check-only pass over Instagram's GraphQL following feed and verifies anything it flags instead of trusting the hint blindly.
 - On other accounts, every tentative miss is exact-searched in the target's followers (paginated, so common username prefixes do not hide a match). If exact search finds the username, the account is moved to "Follows back - corrected."
 - Before any exact follower searches run, the script first searches for a known follower as a reliability check. For self-checks that skip the bulk follower list, that canary can come from a positive batch or individual friendship result. If no canary can prove search reliability, or even a known follower cannot be found, unverified accounts are kept in "Unknown" instead of being miscounted.
 - If verification fails because of a login or rate-limit wall, or a search has too many similar usernames to check definitively, the account is moved to "Unknown" instead of being counted as not following back. Rerunning after the wall clears finishes the Unknown accounts without redoing the verified ones.

@@ -12,7 +12,7 @@
   "private": false,
   "scripts": {
     "build:bookmarklet": "node scripts/build-bookmarklet.mjs",
-    "check": "node --check src/check-follow-back.js && node --check src/check-non-followers-public.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-exact-search.mjs && node scripts/verify-batch-self.mjs && node scripts/verify-rate-limit-wall.mjs && node scripts/verify-html-wall.mjs && node scripts/verify-public.mjs && node scripts/simulate-scale.mjs && node scripts/simulate-public-scale.mjs"
+    "check": "node --check src/check-follow-back.js && node --check src/check-non-followers-public.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-exact-search.mjs && node scripts/verify-batch-self.mjs && node scripts/verify-following-hints.mjs && node scripts/verify-rate-limit-wall.mjs && node scripts/verify-html-wall.mjs && node scripts/verify-public.mjs && node scripts/simulate-scale.mjs && node scripts/simulate-public-scale.mjs"
   },
   "keywords": [
     "instagram",

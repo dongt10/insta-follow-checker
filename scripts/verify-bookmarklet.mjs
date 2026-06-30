@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { BOOKMARKLET_TARGETS, toBookmarklet } from "./build-bookmarklet.mjs";
+import {
+  BOOKMARKLET_TARGETS,
+  COPY_PAGE_TARGET,
+  getCopyItems,
+  toBookmarklet,
+  toCopyPage,
+} from "./build-bookmarklet.mjs";
 
 for (const target of BOOKMARKLET_TARGETS) {
   const bookmarklet = await readFile(new URL(target.bookmarklet, import.meta.url), "utf8");
@@ -20,3 +26,16 @@ for (const target of BOOKMARKLET_TARGETS) {
 
   console.log(`bookmarklet syntax and sync ok: ${name}`);
 }
+
+const copyPage = await readFile(new URL(COPY_PAGE_TARGET, import.meta.url), "utf8");
+const expectedCopyPage = toCopyPage(await getCopyItems());
+
+if (copyPage !== expectedCopyPage) {
+  throw new Error(`${COPY_PAGE_TARGET.replace("../", "")} is out of sync. Run npm run build:bookmarklet.`);
+}
+
+if (!copyPage.includes("Copy script") || !copyPage.includes("Copy bookmarklet")) {
+  throw new Error("copy helper must include script and bookmarklet copy actions");
+}
+
+console.log(`copy helper sync ok: ${COPY_PAGE_TARGET.replace("../", "")}`);
