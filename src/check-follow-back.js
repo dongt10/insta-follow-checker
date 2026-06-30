@@ -26,6 +26,10 @@
     batchVerify: true,
     batchSize: 25,
     batchDelayMs: 2600,
+    individualVerifyUnknowns: true,
+    individualDelayMs: 3200,
+    maxIndividualRechecks: 80,
+    previousUnknownUsernames: [],
     skipFollowerListWhenSelf: "auto",
     minRequestIntervalMs: 700,
     retryLimit: 5,
@@ -37,6 +41,7 @@
     stopExactSearchOnAuthLost: true,
     resume: true,
     resumeTtlMs: 3600000,
+    reverifySavedMisses: true,
   };
   const CONFIG = Object.assign(
     {},
@@ -50,6 +55,15 @@
   }
 
   CONFIG.batchSize = Math.max(1, Math.floor(Number(CONFIG.batchSize) || DEFAULT_CONFIG.batchSize));
+  const configuredMaxIndividualRechecks = Number(CONFIG.maxIndividualRechecks);
+  CONFIG.maxIndividualRechecks = Math.max(
+    0,
+    Math.floor(
+      Number.isFinite(configuredMaxIndividualRechecks)
+        ? configuredMaxIndividualRechecks
+        : DEFAULT_CONFIG.maxIndividualRechecks,
+    ),
+  );
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalizeUsername = (value) => String(value || "").trim().toLowerCase();
@@ -74,6 +88,9 @@
     requests: 0,
     walls: 0,
     done: false,
+    debug: {
+      batchResponseShapes: [],
+    },
   };
   window.IG_FOLLOW_BACK_STATE = state;
   window.IG_OVER1K_STATE = state;
@@ -483,6 +500,10 @@
     return `v:${account.id || normalizeUsername(account.username)}`;
   }
 
+  function retryableUnknownFromSavedVerdict(savedVerdict) {
+    return Boolean(savedVerdict?.unknown && savedVerdict.retryIndividually);
+  }
+
   function clearResumeState(targetId) {
     try {
       window.localStorage?.removeItem?.(resumeKey(targetId));
@@ -565,6 +586,14 @@
     }
   }
 
+  function rerunAdvice() {
+    if (CONFIG.resume) {
+      return "Wait 10-15 minutes and rerun: saved progress is reused, and saved not-following-back results are rechecked before being shown.";
+    }
+
+    return "Wait 10-15 minutes, refresh the profile, and rerun fresh.";
+  }
+
   async function loadProfileUser(username) {
     progress(`Loading profile @${username}`, "profile");
     const profile = await getJson(
@@ -607,7 +636,7 @@
     ) {
       addUsers(usersByUsername, savedAccounts);
       progress(
-        `Reusing the ${type} list saved ${resume.ageMinutes} minutes ago (${usersByUsername.size} accounts), no new requests needed.`,
+        `Reusing the ${type} list saved ${resume.ageMinutes} minutes ago (${usersByUsername.size} accounts), no new list-page requests needed.`,
         type,
       );
 
@@ -661,7 +690,7 @@
       saveResumeState(target.id, resume);
     };
 
-    const runSweep = async (pageSize, passName, initialMaxId) => {
+    const runSweep = async (pageSize, passName, initialMaxId = "") => {
       let maxId = initialMaxId || "";
       let pageCount = 0;
       const before = usersByUsername.size;
@@ -725,7 +754,7 @@
         const added = addUsers(usersByUsername, users);
 
         progress(
-          `${type} count ${pageSize}: page ${pageCount}, page users ${users.length}, added ${added}, union ${usersByUsername.size}`,
+          `${type} requested ${pageSize}: page ${pageCount}, returned ${users.length}, added ${added}, union ${usersByUsername.size}`,
           type,
         );
 
@@ -789,7 +818,7 @@
           break sweeps;
         }
 
-        const sweepResult = await runSweep(pageSize, `round${pass}`, "");
+        const sweepResult = await runSweep(pageSize, `round${pass}`);
 
         if (sweepResult.outcome === "stopped") {
           return stoppedResult(sweepResult.stopReason, sweepResult.stopStatus);
@@ -894,7 +923,177 @@
       },
     );
 
-    return response?.friendship_statuses || null;
+    rememberBatchResponseShape(response);
+
+    return (
+      response?.friendship_statuses
+      || response?.relationships
+      || response?.data?.friendship_statuses
+      || response?.data?.relationships
+      || response?.data
+      || response
+      || null
+    );
+  }
+
+  function describeShape(value, depth = 0) {
+    if (value == null || typeof value !== "object") {
+      return { type: value == null ? "null" : typeof value };
+    }
+
+    if (Array.isArray(value)) {
+      return {
+        type: "array",
+        length: value.length,
+        sample: depth < 2 && value.length ? describeShape(value[0], depth + 1) : undefined,
+      };
+    }
+
+    const keys = Object.keys(value).slice(0, 12);
+    const shape = { type: "object", keys };
+
+    if (depth < 2) {
+      shape.fields = Object.fromEntries(
+        keys.slice(0, 6).map((key) => [key, describeShape(value[key], depth + 1)]),
+      );
+    }
+
+    return shape;
+  }
+
+  function rememberBatchResponseShape(response) {
+    if (state.debug.batchResponseShapes.length >= 3) {
+      return;
+    }
+
+    state.debug.batchResponseShapes.push(describeShape(response));
+  }
+
+  function accountIdFromStatus(candidate) {
+    const rawId = (
+      candidate?.id
+      || candidate?.pk
+      || candidate?.user_id
+      || candidate?.userId
+      || candidate?.target_id
+      || candidate?.user?.id
+      || candidate?.user?.pk
+      || candidate?.relationship?.id
+      || candidate?.relationship?.user_id
+      || candidate?.friendship_status?.id
+      || candidate?.friendship_status?.user_id
+    );
+
+    return rawId == null ? "" : String(rawId);
+  }
+
+  function usernameFromStatus(candidate) {
+    return normalizeUsername(
+      candidate?.username
+      || candidate?.user?.username
+      || candidate?.relationship?.username
+      || candidate?.friendship_status?.username,
+    );
+  }
+
+  function statusMatchesAccount(candidate, account) {
+    const candidateId = accountIdFromStatus(candidate);
+
+    if (account?.id && candidateId && candidateId === String(account.id)) {
+      return true;
+    }
+
+    const candidateUsername = usernameFromStatus(candidate);
+
+    return Boolean(candidateUsername && candidateUsername === normalizeUsername(account?.username));
+  }
+
+  function lookupFriendshipStatus(statuses, account) {
+    if (!statuses) {
+      return null;
+    }
+
+    const accountId = String(account?.id || "");
+    const username = String(account?.username || "");
+    const normalizedUsername = normalizeUsername(username);
+    const containers = [
+      statuses,
+      statuses?.friendship_statuses,
+      statuses?.relationships,
+      statuses?.users,
+      statuses?.items,
+      statuses?.data,
+      statuses?.data?.friendship_statuses,
+      statuses?.data?.relationships,
+      statuses?.data?.users,
+    ].filter(Boolean);
+
+    for (const container of containers) {
+      if (Array.isArray(container)) {
+        const match = container.find((candidate) => statusMatchesAccount(candidate, account));
+
+        if (match) {
+          return match;
+        }
+
+        continue;
+      }
+
+      if (typeof container !== "object") {
+        continue;
+      }
+
+      const directMatches = [
+        accountId && container[accountId],
+        username && container[username],
+        normalizedUsername && container[normalizedUsername],
+      ].filter(Boolean);
+
+      if (directMatches.length > 0) {
+        return directMatches[0];
+      }
+
+      if (statusMatchesAccount(container, account)) {
+        return container;
+      }
+    }
+
+    return null;
+  }
+
+  function followedByFromStatus(status, account) {
+    const candidates = [
+      status,
+      status?.friendship_status,
+      status?.relationship,
+      status?.data,
+    ];
+
+    if (account?.id && status?.friendship_statuses) {
+      candidates.push(status.friendship_statuses[account.id]);
+      candidates.push(status.friendship_statuses[String(account.id)]);
+    }
+
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate.followed_by === "boolean") {
+        return candidate.followed_by;
+      }
+    }
+
+    return null;
+  }
+
+  async function individualFriendshipStatus(account) {
+    if (!account.id) {
+      return null;
+    }
+
+    const response = await getJson(
+      `/api/v1/friendships/show/${encodeURIComponent(account.id)}/`,
+      `individual friendship check @${account.username}`,
+    );
+
+    return followedByFromStatus(response, account);
   }
 
   function resultLines(results) {
@@ -1000,7 +1199,7 @@
       && getCookie("csrftoken"),
     );
     const verificationMethod = batchVerification
-      ? "exact batch friendship checks"
+      ? "batch friendship checks plus individual rechecks"
       : "exact follower search";
     const resume = loadResumeState(target.id);
     const warnings = [];
@@ -1009,7 +1208,7 @@
       resume.loadedFromStorage
       && (Object.keys(resume.lists).length > 0 || Object.keys(resume.verdicts).length > 0)
     ) {
-      warnings.push(`Reused saved progress from ${resume.ageMinutes} minutes ago to avoid repeating requests. For a fully fresh scan, run with window.IG_FOLLOW_BACK_CONFIG = { resume: false }.`);
+      warnings.push(`Reused saved progress from ${resume.ageMinutes} minutes ago to avoid repeating list requests. Saved not-following-back results are rechecked before appearing in the final list.`);
     }
 
     if (batchVerification) {
@@ -1098,27 +1297,68 @@
         "exact verification",
       );
 
+      const configuredPreviousUnknowns = new Set(
+        (
+          Array.isArray(CONFIG.previousUnknownUsernames)
+            ? CONFIG.previousUnknownUsernames
+            : String(CONFIG.previousUnknownUsernames || "").split(",")
+        )
+          .map(normalizeUsername)
+          .filter(Boolean),
+      );
+      const retryablePreviousUnknownKeys = new Set();
       const recordVerdict = (account, followsBack) => {
         (followsBack ? correctedByExactSearch : verifiedNotFollowingBack).push(account);
-        resume.verdicts[verdictKey(account)] = { followsBack };
+        resume.verdicts[verdictKey(account)] = {
+          followsBack,
+          checkedAt: new Date().toISOString(),
+        };
       };
+      const recordUnknown = (account, reason, options = {}) => {
+        unknown.push({ ...account, reason });
+        resume.verdicts[verdictKey(account)] = {
+          followsBack: null,
+          unknown: true,
+          reason,
+          reasonCode: options.reasonCode || "",
+          retryIndividually: Boolean(options.retryIndividually),
+          checkedAt: new Date().toISOString(),
+        };
+      };
+      const shouldRecheckUnknownIndividually = (account) => (
+        retryablePreviousUnknownKeys.has(verdictKey(account))
+        || configuredPreviousUnknowns.has(normalizeUsername(account.username))
+      );
       const pendingVerification = [];
-      let resumedVerdicts = 0;
+      let resumedFollowsBack = 0;
+      let recheckingSavedMisses = 0;
 
       for (const account of tentativeMisses) {
-        const savedVerdict = resume.verdicts[verdictKey(account)];
+        const key = verdictKey(account);
+        const savedVerdict = resume.verdicts[key];
 
-        if (savedVerdict && typeof savedVerdict.followsBack === "boolean") {
-          (savedVerdict.followsBack ? correctedByExactSearch : verifiedNotFollowingBack).push(account);
-          resumedVerdicts += 1;
+        if (savedVerdict && savedVerdict.followsBack === true) {
+          correctedByExactSearch.push(account);
+          resumedFollowsBack += 1;
         } else {
+          if (savedVerdict && savedVerdict.followsBack === false && CONFIG.reverifySavedMisses !== false) {
+            recheckingSavedMisses += 1;
+          } else if (savedVerdict && savedVerdict.followsBack === false) {
+            verifiedNotFollowingBack.push(account);
+            continue;
+          }
+
+          if (retryableUnknownFromSavedVerdict(savedVerdict)) {
+            retryablePreviousUnknownKeys.add(key);
+          }
+
           pendingVerification.push(account);
         }
       }
 
-      if (resumedVerdicts > 0) {
+      if (resumedFollowsBack > 0 || recheckingSavedMisses > 0) {
         progress(
-          `Reused ${resumedVerdicts} verified results from the previous run, ${pendingVerification.length} still to check.`,
+          `Reused ${resumedFollowsBack} saved follows-back results and rechecking ${recheckingSavedMisses} saved not-following-back results to prevent false positives. ${pendingVerification.length} accounts still need verification.`,
           "exact verification",
         );
       }
@@ -1128,16 +1368,26 @@
       if (batchVerification && pendingVerification.length > 0) {
         const withIds = pendingVerification.filter((account) => account.id);
         const exactFallback = pendingVerification.filter((account) => !account.id);
+        const individualFallback = [];
+        let batchResolvedCount = 0;
+        const parkUnresolvedBatchAccount = (account, reason) => {
+          if (followerLoad.skipped) {
+            recordUnknown(account, reason, { reasonCode: "batch-unresolved-large" });
+          } else {
+            exactFallback.push(account);
+          }
+        };
 
         for (let index = 0; index < withIds.length; index += CONFIG.batchSize) {
           const batchAccounts = withIds.slice(index, index + CONFIG.batchSize);
 
           if (authLost && CONFIG.stopExactSearchOnAuthLost) {
             for (const account of batchAccounts) {
-              unknown.push({
-                ...account,
-                reason: "Login or rate-limit wall appeared before this batch was checked.",
-              });
+              recordUnknown(
+                account,
+                "Login or rate-limit wall appeared before this batch was checked.",
+                { reasonCode: "batch-auth-wall" },
+              );
             }
             continue;
           }
@@ -1146,12 +1396,14 @@
             const statuses = await batchFriendshipStatuses(batchAccounts);
 
             for (const account of batchAccounts) {
-              const status = statuses ? statuses[account.id] : null;
+              const status = lookupFriendshipStatus(statuses, account);
+              const followsBack = followedByFromStatus(status, account);
 
-              if (status && typeof status.followed_by === "boolean") {
-                recordVerdict(account, status.followed_by);
+              if (typeof followsBack === "boolean") {
+                batchResolvedCount += 1;
+                recordVerdict(account, followsBack);
               } else {
-                exactFallback.push(account);
+                individualFallback.push(account);
               }
             }
           } catch (error) {
@@ -1159,9 +1411,8 @@
               authLost = true;
 
               for (const account of batchAccounts) {
-                unknown.push({
-                  ...account,
-                  reason: error.message || String(error),
+                recordUnknown(account, error.message || String(error), {
+                  reasonCode: "batch-wall",
                 });
               }
             } else {
@@ -1180,6 +1431,104 @@
           }
         }
 
+        if (individualFallback.length > 0) {
+          const previousUnknownCandidates = individualFallback.filter(shouldRecheckUnknownIndividually);
+          let individualCandidates = [];
+          const skippedIndividual = [];
+
+          if (!CONFIG.individualVerifyUnknowns) {
+            skippedIndividual.push(...individualFallback);
+          } else if (authLost && CONFIG.stopExactSearchOnAuthLost) {
+            for (const account of individualFallback) {
+              recordUnknown(
+                account,
+                "Login or rate-limit wall appeared before this individual check.",
+                { reasonCode: "individual-auth-wall" },
+              );
+            }
+          } else if (individualFallback.length <= CONFIG.maxIndividualRechecks) {
+            individualCandidates = individualFallback;
+          } else {
+            individualCandidates = previousUnknownCandidates.slice(0, CONFIG.maxIndividualRechecks);
+
+            const individualCandidateKeys = new Set(individualCandidates.map(verdictKey));
+            skippedIndividual.push(
+              ...individualFallback.filter((account) => !individualCandidateKeys.has(verdictKey(account))),
+            );
+          }
+
+          if (skippedIndividual.length > 0) {
+            const skippedDestination = followerLoad.skipped
+              ? "kept the rest Unknown"
+              : "sent the rest to exact follower search";
+            const capReason = CONFIG.individualVerifyUnknowns
+              ? `Batch friendship checks left ${individualFallback.length} accounts unresolved, above the ${CONFIG.maxIndividualRechecks} individual-recheck safety cap. Rechecked ${individualCandidates.length} prior Unknown accounts individually and ${skippedDestination} instead of making hundreds of requests.`
+              : "Individual friendship rechecks are disabled; unresolved batch accounts were not counted as not following back.";
+
+            progress(capReason, "exact verification");
+            warnings.push(capReason);
+
+            for (const account of skippedIndividual) {
+              parkUnresolvedBatchAccount(account, capReason);
+            }
+          }
+
+          if (individualCandidates.length > 0) {
+            progress(
+              `Rechecking ${individualCandidates.length} unresolved account${individualCandidates.length === 1 ? "" : "s"} one by one with individual friendship checks.`,
+              "exact verification",
+            );
+          }
+
+          for (let index = 0; index < individualCandidates.length; index += 1) {
+            const account = individualCandidates[index];
+
+            try {
+              const followsBack = await individualFriendshipStatus(account);
+
+              if (typeof followsBack === "boolean") {
+                recordVerdict(account, followsBack);
+              } else if (followerLoad.skipped) {
+                recordUnknown(account, "Individual friendship check did not return a readable relationship status.", {
+                  reasonCode: "individual-unreadable",
+                  retryIndividually: true,
+                });
+              } else {
+                exactFallback.push(account);
+              }
+            } catch (error) {
+              if (error.authLost || error.rateLimited || error.relationshipBlocked) {
+                authLost = true;
+                recordUnknown(account, error.message || String(error), {
+                  reasonCode: "individual-wall",
+                  retryIndividually: true,
+                });
+              } else {
+                exactFallback.push(account);
+              }
+            }
+
+            if ((index + 1) % 10 === 0 || index + 1 === individualCandidates.length) {
+              progress(
+                `Individual checked ${index + 1}/${individualCandidates.length}: follows back ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
+                "exact verification",
+              );
+              saveResumeState(target.id, resume);
+            }
+
+            if (index + 1 < individualCandidates.length) {
+              await sleep(paceDelay(CONFIG.individualDelayMs));
+            }
+          }
+        }
+
+        if (batchResolvedCount === 0 && individualFallback.length > CONFIG.maxIndividualRechecks) {
+          const shapeWarning = "The batch friendship endpoint returned no readable followed_by statuses. Response-shape notes are saved in window.IG_FOLLOW_BACK_STATE.debug.batchResponseShapes for troubleshooting.";
+
+          warnings.push(shapeWarning);
+          progress(shapeWarning, "exact verification");
+        }
+
         if (exactFallback.length > 0) {
           progress(
             `Falling back to exact follower search for ${exactFallback.length} accounts the batch check could not resolve.`,
@@ -1190,12 +1539,16 @@
         pendingExactSearch = exactFallback;
       }
 
+      const exactSearchCanary = followerLoad.usersByUsername.size > 0
+        ? followerLoad.usersByUsername.values().next().value
+        : (followerLoad.skipped && batchVerification ? correctedByExactSearch[0] : null);
+
       if (
         pendingExactSearch.length > 0
-        && followerLoad.usersByUsername.size > 0
+        && exactSearchCanary
         && !(authLost && CONFIG.stopExactSearchOnAuthLost)
       ) {
-        const canary = followerLoad.usersByUsername.values().next().value;
+        const canary = exactSearchCanary;
         let canaryProblem = "";
 
         try {
@@ -1215,22 +1568,37 @@
           warnings.push(`${canaryProblem} Unverified accounts were kept in Unknown instead of being counted as not following back. Wait 10-15 minutes and rerun.`);
 
           for (const account of pendingExactSearch) {
-            unknown.push({ ...account, reason: canaryProblem });
+            recordUnknown(account, canaryProblem, { reasonCode: "exact-canary-failed" });
           }
 
           pendingExactSearch = [];
         } else {
           await sleep(paceDelay(CONFIG.exactSearchDelayMs));
         }
+      } else if (
+        pendingExactSearch.length > 0
+        && followerLoad.skipped
+        && batchVerification
+        && !(authLost && CONFIG.stopExactSearchOnAuthLost)
+      ) {
+        const canaryProblem = "Exact follower search was skipped because no known follower was available to prove follower-search reliability after the bulk follower list was skipped.";
+
+        progress(canaryProblem, "exact verification");
+        warnings.push(`${canaryProblem} Unverified accounts were kept in Unknown instead of being counted as not following back.`);
+
+        for (const account of pendingExactSearch) {
+          recordUnknown(account, canaryProblem, { reasonCode: "exact-canary-missing" });
+        }
+
+        pendingExactSearch = [];
       }
 
       for (let index = 0; index < pendingExactSearch.length; index += 1) {
         const account = pendingExactSearch[index];
 
         if (authLost && CONFIG.stopExactSearchOnAuthLost) {
-          unknown.push({
-            ...account,
-            reason: "Login or rate-limit wall appeared before exact search.",
+          recordUnknown(account, "Login or rate-limit wall appeared before exact search.", {
+            reasonCode: "exact-auth-wall",
           });
           continue;
         }
@@ -1242,9 +1610,8 @@
             authLost = true;
           }
 
-          unknown.push({
-            ...account,
-            reason: error.message || String(error),
+          recordUnknown(account, error.message || String(error), {
+            reasonCode: "exact-error",
           });
         }
 
@@ -1263,7 +1630,7 @@
     }
 
     if (followingLoad.stoppedEarly) {
-      warnings.push(`Following list stopped early: ${followingLoad.stopReason}. Loaded accounts were kept, but accounts Instagram did not expose cannot be checked in this run. Wait 10-15 minutes and rerun: saved progress is reused, so the rerun only requests what is still missing.`);
+      warnings.push(`Following list stopped early: ${followingLoad.stopReason}. Loaded accounts were kept, but accounts Instagram did not expose cannot be checked in this run. ${rerunAdvice()}`);
     }
 
     if (followerLoad.stoppedEarly) {
@@ -1279,7 +1646,7 @@
     }
 
     if (followingListUnavailable || followerListUnavailable) {
-      warnings.push("No reliable not-following-back result was produced because Instagram blocked a required list before enough data loaded. Wait 10-15 minutes, refresh the profile, and rerun: saved progress is reused so the rerun is much lighter.");
+      warnings.push(`No reliable not-following-back result was produced because Instagram blocked a required list before enough data loaded. ${rerunAdvice()}`);
     }
 
     if (
@@ -1301,7 +1668,7 @@
     }
 
     if (authLost) {
-      warnings.push("Login, HTML, or rate-limit wall appeared during exact verification; affected accounts were moved to Unknown instead of counted. Wait 10-15 minutes and rerun: verified results were saved, so the rerun only checks the Unknown accounts.");
+      warnings.push(`Login, HTML, or rate-limit wall appeared during exact verification; affected accounts were moved to Unknown instead of counted. ${rerunAdvice()}`);
     }
 
     if (

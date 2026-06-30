@@ -24,8 +24,8 @@ The rest of this README documents the main self-check script. The public script 
   - **Your own account:** uses Instagram's batch friendship endpoint (`show_many`), which returns a definitive follows-you-back answer for ~25 accounts per request. This is both exact and far lighter on requests than paging the whole follower list.
   - **Someone else's account:** loads their follower list and exact-searches each tentative miss in it.
 - Paces every request: a minimum interval between requests, jittered delays, exponential backoff that honors `Retry-After` in full (including the HTTP-date form), and automatic slowdown (up to 8x spacing) whenever Instagram pushes back. Deterministic client errors are not retried at all.
-- Skips requests it does not need: a relationship list that already loaded completely is not re-paged, for self-checks with many followers the wall-prone bulk follower list is skipped entirely, and if the following list is blocked outright the run stops before spending any follower requests.
-- Saves progress to `localStorage` (1 hour TTL, scoped to your login and the target): if a rate-limit wall interrupts a run, rerunning the script reuses loaded lists, partially loaded pages (continuing from the saved position), and verified results, so it only requests what is still missing. The saved state is cleared automatically after a fully clean run so results never go stale.
+- Skips requests it does not need: a relationship list that already loaded completely is not re-paged, self-checks only auto-skip the wall-prone bulk follower list when it is much larger than the following list, and if the following list is blocked outright the run stops before spending any follower requests.
+- Saves progress to `localStorage` (1 hour TTL, scoped to your login and the target): interrupted reruns can reuse loaded lists, partial pages, and verified follows-back corrections. Saved not-following-back verdicts are cross-checked live before they appear in the final list, so stale false positives are not reused blindly.
 - Prints only verified not-following-back accounts, with follows-back corrections and unknown results separated.
 - Runs locally in your browser session.
 
@@ -66,18 +66,23 @@ window.IG_FOLLOW_BACK_CONFIG = {
   relationshipListDelayMs: 1800,   // delay between relationship-list pages
   exactSearchDelayMs: 2400,        // delay between exact follower searches
   batchDelayMs: 2600,              // delay between batch friendship checks
+  individualDelayMs: 3200,         // delay between one-account friendship rechecks
   minRequestIntervalMs: 700,       // hard minimum spacing between any two requests
   batchVerify: true,               // use batch friendship checks on your own account
   batchSize: 25,                   // accounts per batch friendship check
-  skipFollowerListWhenSelf: "auto", // skip the bulk follower list on self-checks ("auto", true, false)
-  resume: true,                    // reuse saved progress from interrupted runs
+  individualVerifyUnknowns: true,   // recheck unresolved batch results one by one
+  maxIndividualRechecks: 80,        // safety cap so a broken batch response does not trigger hundreds of single checks
+  previousUnknownUsernames: [],      // optional usernames from a prior Unknown list to prioritize one-by-one
+  skipFollowerListWhenSelf: "auto", // skip bulk followers only when it is much larger than following (true, "auto", false)
+  resume: true,                    // reuse saved list progress from interrupted runs
   resumeTtlMs: 3600000,            // how long saved progress stays valid (1 hour)
+  reverifySavedMisses: true,        // cross-check saved not-following-back verdicts before reporting
   retryLimit: 5,                   // retries per request
   retryBaseDelayMs: 12000,         // backoff base; rate walls back off exponentially
 };
 ```
 
-For large accounts, avoid setting delays too low. Instagram can rate-limit or log out fast request bursts. If a run does get walled, just wait 10-15 minutes and rerun: saved progress means the rerun only requests what is still missing.
+For large accounts, avoid setting delays too low. Instagram can rate-limit or log out fast request bursts. If a run does get walled, wait 10-15 minutes and rerun. Resume makes the rerun lighter, but saved not-following-back verdicts are verified again so stale misses do not become false positives.
 
 ## Bookmarklet
 
@@ -87,18 +92,18 @@ Create a new bookmark, paste the contents of `bookmarklet.js` into the URL field
 
 ## Accuracy
 
-Instagram may show profile counts that differ from the loaded list counts because of stale counts, unavailable accounts, or pagination quirks. This matters on accounts over 1k: the bulk followers endpoint can miss people who are actually followers.
+Instagram may show profile counts that differ from the loaded list counts because of stale counts, unavailable accounts, or pagination quirks. The bulk followers endpoint can also miss people who are actually followers, so self-checks use the follower list when it is reasonably sized and only auto-skip it when it is much larger than the following list.
 
 To be exact down to the last account, the script never trusts the bulk comparison by itself:
 
-- On your own account, every tentative miss gets a definitive answer from Instagram's friendship-status endpoint - the same data Instagram uses to render "Follows you" badges.
+- On your own account, every tentative miss is checked with Instagram's batch friendship-status endpoint first. If the batch endpoint withholds a status, the script rechecks those unresolved accounts one by one before leaving them Unknown.
 - On other accounts, every tentative miss is exact-searched in the target's followers (paginated, so common username prefixes do not hide a match). If exact search finds the username, the account is moved to "Follows back - corrected."
-- Before any exact searches run, the script first searches for a known follower as a reliability check. If even a known follower cannot be found, search is considered unreliable and all unverified accounts are kept in "Unknown" instead of being miscounted.
+- Before any exact follower searches run, the script first searches for a known follower as a reliability check. For self-checks that skip the bulk follower list, that canary can come from a positive batch or individual friendship result. If no canary can prove search reliability, or even a known follower cannot be found, unverified accounts are kept in "Unknown" instead of being miscounted.
 - If verification fails because of a login or rate-limit wall, or a search has too many similar usernames to check definitively, the account is moved to "Unknown" instead of being counted as not following back. Rerunning after the wall clears finishes the Unknown accounts without redoing the verified ones.
 
 ## Rate limits
 
-If you see a warning like `rate-limit wall (200)`, Instagram returned a temporary block page while still using HTTP 200. The script slows itself down (up to 8x spacing), retries with exponential backoff honoring any `Retry-After` header, and if the block persists, stops safely with no verified misses counted. Wait 10-15 minutes, refresh the profile, and rerun: the rerun reuses saved progress, so it is much lighter than the first run.
+If you see a warning like `rate-limit wall (200)`, Instagram returned a temporary block page while still using HTTP 200. The script slows itself down (up to 8x spacing), retries with exponential backoff honoring any `Retry-After` header, and if the block persists, stops safely with no verified misses counted. Wait 10-15 minutes, refresh the profile, and rerun; saved list progress is reused when available, while saved misses are cross-checked before reporting.
 
 If you see `HTML/non-JSON wall (200)` on the followers list, Instagram served the normal website HTML instead of follower JSON for that profile/session. This can happen even while the following list still loads, and the Instagram follower modal may also show an empty/suggested-accounts state. When checking someone else's profile, the script stops with zero verified misses because it cannot prove who follows back until Instagram exposes real follower data again. When checking your own account, this wall does not affect accuracy because the batch friendship check answers directly.
 
@@ -111,10 +116,11 @@ The commit history shows this script has mostly evolved around avoiding false po
 - They depend on Instagram's private web endpoints and page data. Instagram can change those APIs, cookies, response shapes, or rate-limit behavior without warning.
 - They only work from a signed-in browser session that can already view the target profile's follower and following lists. Private, blocked, restricted, or temporarily hidden lists cannot be bypassed.
 - Large lists can be incomplete because of stale counts, unavailable accounts, pagination quirks, or Instagram returning HTML instead of JSON. The scripts try to verify tentative misses before counting them, but blocked data can still leave accounts in `Unknown` or `Unconfirmed`.
-- Self-checks are the most reliable path because `show_many` can answer whether each account follows you back. Other-account checks cannot use that endpoint for the target account, so they rely on follower-list reads and limited exact searches.
+- Instagram may return fewer users than requested on each relationship-list page; for example, a request for `count=100` can still return roughly 25 users. This makes follower-list scans slower than the request size suggests.
+- Self-checks are the most reliable path because `show_many` can answer whether each account follows you back. Small unresolved leftovers, or usernames you explicitly pass in `previousUnknownUsernames`, are rechecked one by one with the individual friendship endpoint. If a batch response shape breaks and hundreds of accounts become unresolved at once, the script stops that wave at `maxIndividualRechecks` and keeps the rest in `Unknown` instead of hammering Instagram.
 - The public/other-account script is intentionally slower and may stop early. That is by design: earlier per-account search patterns could trigger "We limit how often you can do certain things" blocks, so unresolved accounts are parked for a later rerun instead of being forced through.
 - Lowering the delays or verification caps can make the run faster, but it also increases the chance of temporary blocks, logout prompts, and incomplete results.
-- Saved progress is only a local browser snapshot with a 1 hour default TTL. It helps resume interrupted runs, but the result can still become stale if accounts follow, unfollow, deactivate, or change privacy during or after the scan.
+- Saved progress stores a local browser snapshot with a 1 hour default TTL. It helps resume interrupted runs, and saved not-following-back results are cross-checked live before reporting, but profile changes during a scan can still leave accounts in `Unknown`.
 - The scripts do not run on Instagram's behalf as an approved integration. Treat them as inspectable browser-console utilities, not a guaranteed long-term API client.
 
 ## Checking someone else's account (public script)

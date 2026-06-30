@@ -26,6 +26,16 @@ function pageOf(list, count, offsetParam) {
   return body;
 }
 
+function mockJsonResponse(body) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: (header) => (header === "content-type" ? "application/json; charset=utf-8" : null) },
+    text: async () => JSON.stringify(body),
+  };
+}
+
 function runScenario({ name, profile, following, servedFollowers, groundTruthFollowerIds, walls, config, storage, viewerId }) {
   const fetchLog = [];
   const attemptsByUrl = new Map();
@@ -140,6 +150,16 @@ function runScenario({ name, profile, following, servedFollowers, groundTruthFol
         }
 
         return jsonResponse({ friendship_statuses: friendshipStatuses, status: "ok" });
+      }
+
+      const individualMatch = String(url).match(/^\/api\/v1\/friendships\/show\/(\d+)\/$/);
+
+      if (individualMatch) {
+        return jsonResponse({
+          following: true,
+          followed_by: groundTruthFollowerIds.has(individualMatch[1]),
+          status: "ok",
+        });
       }
 
       throw new Error(`unexpected fetch ${url}`);
@@ -257,6 +277,7 @@ const SELF_ID = "42";
     groundTruthFollowerIds,
     viewerId: SELF_ID,
     storage,
+    config: { skipFollowerListWhenSelf: false },
     walls: (url, attempts) => {
       if (url === `/api/v1/friendships/${SELF_ID}/following/?count=100&max_id=200` && attempts === 1) {
         return {
@@ -340,6 +361,297 @@ const SELF_ID = "42";
 }
 
 {
+  const following = [1, 2, 3].map((id) => makeAccount(id, "canary"));
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "B2: self-check, skipped follower list, unresolved batch fixed individually",
+    profile: { id: SELF_ID, username: "canaryself", followerCount: 100, followingCount: 3 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds: new Set(["1", "2"]),
+    viewerId: SELF_ID,
+    storage,
+    walls: (url) => {
+      if (url === "/api/v1/friendships/show_many/") {
+        return mockJsonResponse({
+          friendship_statuses: {
+            1: { following: true, followed_by: true },
+            2: { following: true, followed_by: true },
+          },
+          status: "ok",
+        });
+      }
+
+      if (url.includes("/followers/?") && url.includes("query=")) {
+        return mockJsonResponse({ users: [], status: "ok" });
+      }
+
+      return null;
+    },
+  });
+
+  if (run.results.verifiedNotFollowingBack.length !== 1 || run.results.verifiedNotFollowingBack[0].username !== "canary_00003") {
+    throw new Error(`B2: expected canary_00003 to be resolved by individual recheck, got ${JSON.stringify(run.results.verifiedNotFollowingBack)}`);
+  }
+
+  if (run.results.unknown.length !== 0) {
+    throw new Error(`B2: expected no unknowns after individual recheck, got ${JSON.stringify(run.results.unknown)}`);
+  }
+
+  if (run.fetchLog.some((call) => decodeURIComponent(String(call.url)).includes("query=canary_00003"))) {
+    throw new Error("B2: exact follower search should not run once the individual recheck resolves the account");
+  }
+
+  if (!run.fetchLog.some((call) => String(call.url) === "/api/v1/friendships/show/3/")) {
+    throw new Error("B2: unresolved batch account must be rechecked individually");
+  }
+
+  report(run);
+}
+
+{
+  const following = [1, 2].map((id) => makeAccount(id, "silent"));
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "B3: self-check, individual recheck also withholds relationship status",
+    profile: { id: SELF_ID, username: "silentself", followerCount: 100, followingCount: 2 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds: new Set(["1"]),
+    viewerId: SELF_ID,
+    storage,
+    walls: (url) => {
+      if (url === "/api/v1/friendships/show_many/") {
+        return mockJsonResponse({
+          friendship_statuses: {},
+          status: "ok",
+        });
+      }
+
+      if (String(url).startsWith("/api/v1/friendships/show/")) {
+        return mockJsonResponse({ status: "ok" });
+      }
+
+      return null;
+    },
+  });
+
+  if (run.results.verifiedNotFollowingBack.length !== 0) {
+    throw new Error(`B3: unanswered individual checks must not become verified misses: ${JSON.stringify(run.results.verifiedNotFollowingBack)}`);
+  }
+
+  if (run.results.unknown.length !== 2) {
+    throw new Error(`B3: expected both unanswered accounts to stay Unknown, got ${JSON.stringify(run.results.unknown)}`);
+  }
+
+  report(run);
+}
+
+{
+  const following = [];
+
+  for (let id = 1; id <= 546; id += 1) {
+    following.push(makeAccount(id, "blocked"));
+  }
+
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "B4: self-check, broken batch shape does not recheck hundreds individually",
+    profile: { id: SELF_ID, username: "blockedself", followerCount: 5000, followingCount: 546 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds: new Set(following.slice(0, 500).map((user) => user.pk)),
+    viewerId: SELF_ID,
+    storage,
+    walls: (url) => {
+      if (url === "/api/v1/friendships/show_many/") {
+        return mockJsonResponse({
+          friendship_statuses: {},
+          status: "ok",
+        });
+      }
+
+      return null;
+    },
+  });
+
+  if (run.fetchLog.some((call) => String(call.url).startsWith("/api/v1/friendships/show/"))) {
+    throw new Error("B4: a broken batch wave must not become hundreds of individual friendship checks");
+  }
+
+  if (run.results.unknown.length !== 546) {
+    throw new Error(`B4: expected all unresolved accounts to stay Unknown, got ${run.results.unknown.length}`);
+  }
+
+  if (!run.results.warnings.some((warning) => warning.includes("individual-recheck safety cap"))) {
+    throw new Error(`B4: expected a safety-cap warning, got ${JSON.stringify(run.results.warnings)}`);
+  }
+
+  report(run);
+}
+
+{
+  const following = [];
+
+  for (let id = 1; id <= 100; id += 1) {
+    following.push(makeAccount(id, "retry"));
+  }
+
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "B5: self-check, only prior Unknown accounts are rechecked individually over cap",
+    profile: { id: SELF_ID, username: "retryself", followerCount: 5000, followingCount: 100 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds: new Set(["5"]),
+    viewerId: SELF_ID,
+    storage,
+    config: { previousUnknownUsernames: ["retry_00005", "retry_00009"] },
+    walls: (url) => {
+      if (url === "/api/v1/friendships/show_many/") {
+        return mockJsonResponse({
+          friendship_statuses: {},
+          status: "ok",
+        });
+      }
+
+      return null;
+    },
+  });
+
+  const individualUrls = run.fetchLog
+    .map((call) => String(call.url))
+    .filter((url) => url.startsWith("/api/v1/friendships/show/"));
+
+  if (individualUrls.length !== 2) {
+    throw new Error(`B5: expected exactly two prior Unknown individual checks, got ${individualUrls.join(", ")}`);
+  }
+
+  if (!individualUrls.includes("/api/v1/friendships/show/5/") || !individualUrls.includes("/api/v1/friendships/show/9/")) {
+    throw new Error(`B5: wrong accounts rechecked individually: ${individualUrls.join(", ")}`);
+  }
+
+  assertExactSet("B5 corrected", run.results.correctedByExactSearch, ["retry_00005"]);
+  assertExactSet("B5 missing", run.results.verifiedNotFollowingBack, ["retry_00009"]);
+
+  if (run.results.unknown.length !== 98) {
+    throw new Error(`B5: expected the other 98 accounts to stay Unknown, got ${run.results.unknown.length}`);
+  }
+
+  report(run);
+}
+
+{
+  const following = [makeAccount(1, "stale")];
+  const storage = new Map();
+  const savedAccounts = following.map((user) => ({
+    username: user.username,
+    fullName: user.full_name,
+    id: user.pk,
+    isPrivate: false,
+    isVerified: false,
+  }));
+
+  storage.set(`ig-follow-back-resume:${SELF_ID}:${SELF_ID}`, JSON.stringify({
+    createdAt: 1765000000000,
+    lists: {
+      following: {
+        complete: true,
+        accounts: savedAccounts,
+        maxId: "",
+        pageSize: 0,
+      },
+    },
+    verdicts: {
+      "v:1": {
+        followsBack: false,
+        checkedAt: "2025-12-06T00:00:00.000Z",
+      },
+    },
+  }));
+
+  const run = await runScenario({
+    name: "B6: self-check, resumed false positive is reverified and corrected",
+    profile: { id: SELF_ID, username: "staleself", followerCount: 5000, followingCount: 1 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds: new Set(["1"]),
+    viewerId: SELF_ID,
+    storage,
+    walls: null,
+  });
+
+  if (run.fetchLog.some((call) => String(call.url).includes("/following/?count="))) {
+    throw new Error("B6: complete saved following list should be reused");
+  }
+
+  if (!run.fetchLog.some((call) => String(call.url) === "/api/v1/friendships/show_many/")) {
+    throw new Error("B6: saved not-following-back verdict must be rechecked live");
+  }
+
+  if (run.results.verifiedNotFollowingBack.length !== 0) {
+    throw new Error(`B6: stale saved miss must not remain a verified miss: ${JSON.stringify(run.results.verifiedNotFollowingBack)}`);
+  }
+
+  assertExactSet("B6 corrected stale false positive", run.results.correctedByExactSearch, ["stale_00001"]);
+
+  report(run);
+}
+
+{
+  const following = [];
+
+  for (let id = 1; id <= 547; id += 1) {
+    following.push(makeAccount(id, "ratio"));
+  }
+
+  const followBack = following.slice(0, 506);
+  const groundTruthFollowerIds = new Set(followBack.map((user) => user.pk));
+  const expectedMisses = following.slice(506).map((user) => user.username);
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "B7: self-check, near-even follower ratio loads followers when batch is unreadable",
+    profile: { id: SELF_ID, username: "ratioself", followerCount: 506, followingCount: 547 },
+    following,
+    servedFollowers: followBack,
+    groundTruthFollowerIds,
+    viewerId: SELF_ID,
+    storage,
+    walls: (url) => {
+      if (url === "/api/v1/friendships/show_many/") {
+        return mockJsonResponse({
+          friendship_statuses: {},
+          status: "ok",
+        });
+      }
+
+      return null;
+    },
+  });
+
+  if (run.results.loaded.followers === "skipped") {
+    throw new Error("B7: near-even follower/following ratio must not skip the follower list");
+  }
+
+  if (!run.fetchLog.some((call) => String(call.url).includes("/followers/?count="))) {
+    throw new Error("B7: follower list should be loaded before relying on batch checks");
+  }
+
+  if (run.results.unknown.length !== 0) {
+    throw new Error(`B7: expected no unknowns after individual recheck of real misses, got ${run.results.unknown.length}`);
+  }
+
+  assertExactSet(run.name, run.results.verifiedNotFollowingBack, expectedMisses);
+
+  report(run);
+}
+
+{
   const following = [];
 
   for (let id = 1; id <= 1200; id += 1) {
@@ -379,7 +691,7 @@ const SELF_ID = "42";
     groundTruthFollowerIds,
     viewerId: SELF_ID,
     storage,
-    config: { retryLimit: 1 },
+    config: { resume: true, retryLimit: 1 },
     walls: interruptedWalls,
   });
 
@@ -403,6 +715,7 @@ const SELF_ID = "42";
     groundTruthFollowerIds,
     viewerId: SELF_ID,
     storage,
+    config: { resume: true },
     walls: null,
   });
 

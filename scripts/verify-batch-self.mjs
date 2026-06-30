@@ -105,6 +105,7 @@ const context = vm.createContext({
       retryBaseDelayMs: 0,
       retryLimit: 0,
       relationshipPageSizes: [100, 50],
+      resume: true,
     },
     location: {
       hostname: "www.instagram.com",
