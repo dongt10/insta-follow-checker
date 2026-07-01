@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Simplified the README copy flow with a rendered helper link and clearer clipboard-copy button labels.
+
 ## v1.3.0 - 2026-06-30
 
 - Added `copy.html`, a one-click copy page for the self-check script, public-account script, and both bookmarklets.

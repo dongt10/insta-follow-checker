@@ -56,7 +56,7 @@ export async function getCopyItems() {
       title: target.title,
       description: target.description,
       file: target.source.replace("../", ""),
-      buttonLabel: "Copy script",
+      buttonLabel: "Copy script to clipboard",
       content: source,
       size: formatBytes(Buffer.byteLength(source, "utf8")),
     });
@@ -65,7 +65,7 @@ export async function getCopyItems() {
       title: target.bookmarkletTitle,
       description: "Paste this into a browser bookmark URL, then click it while viewing the Instagram profile.",
       file: target.bookmarklet.replace("../", ""),
-      buttonLabel: "Copy bookmarklet",
+      buttonLabel: "Copy bookmarklet to clipboard",
       content: bookmarklet,
       size: formatBytes(Buffer.byteLength(bookmarklet, "utf8")),
     });
@@ -276,10 +276,10 @@ export function toCopyPage(items) {
   <main>
     <header>
       <h1>Copy Instagram Follow Back Checker</h1>
-      <p>Choose the script you need, copy it, then paste it into the Instagram DevTools Console or into a bookmark URL.</p>
+      <p>Click the copy button you need, then paste into the Instagram DevTools Console or into a bookmark URL.</p>
     </header>
 
-    <div class="notice">Only run browser-console scripts you trust. These scripts run locally in your current Instagram browser session.</div>
+    <div class="notice">Only run browser-console scripts you trust. These scripts run locally in your current Instagram browser session. If clipboard access is blocked, this page opens a manual copy box.</div>
 
     <section id="items" class="grid" aria-live="polite"></section>
     <div id="status" class="status" role="status"></div>
@@ -323,7 +323,7 @@ export function toCopyPage(items) {
 
         await navigator.clipboard.writeText(item.content);
         fallbackEl.classList.remove("visible");
-        setStatus("Copied " + item.title + ".");
+        setStatus(item.title + " copied to your clipboard.");
       } catch {
         showFallback(item.content);
       }
@@ -360,12 +360,15 @@ export function toCopyPage(items) {
       const copy = document.createElement("button");
       copy.type = "button";
       copy.textContent = item.buttonLabel;
+      copy.setAttribute("aria-label", "Copy " + item.title + " to clipboard");
       copy.addEventListener("click", () => copyText(item));
 
       const open = document.createElement("a");
       open.className = "button secondary";
       open.href = item.file;
-      open.textContent = "Open file";
+      open.target = "_blank";
+      open.rel = "noreferrer";
+      open.textContent = "View source";
 
       actions.append(copy, open);
       article.append(head, actions);
