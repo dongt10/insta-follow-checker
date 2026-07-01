@@ -34,7 +34,7 @@ if (copyPage !== expectedCopyPage) {
   throw new Error(`${COPY_PAGE_TARGET.replace("../", "")} is out of sync. Run npm run build:bookmarklet.`);
 }
 
-if (!copyPage.includes("Copy script") || !copyPage.includes("Copy bookmarklet")) {
+if (!copyPage.includes("copy script") || !copyPage.includes("copy bookmarklet")) {
   throw new Error("copy helper must include script and bookmarklet copy actions");
 }
 

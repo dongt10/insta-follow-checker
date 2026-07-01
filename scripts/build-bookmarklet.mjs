@@ -4,19 +4,19 @@ import { pathToFileURL } from "node:url";
 export const BOOKMARKLET_TARGETS = [
   {
     id: "self-script",
-    title: "Self-check console script",
-    description: "Use this on your own Instagram profile. It uses exact batch friendship checks when possible.",
+    title: "self check",
+    description: "for your own instagram profile.",
     source: "../src/check-follow-back.js",
     bookmarklet: "../bookmarklet.js",
-    bookmarkletTitle: "Self-check bookmarklet",
+    bookmarkletTitle: "self bookmarklet",
   },
   {
     id: "public-script",
-    title: "Public-account console script",
-    description: "Use this for another visible account. It compares follower and following lists without per-account search storms.",
+    title: "public account",
+    description: "for another visible profile.",
     source: "../src/check-non-followers-public.js",
     bookmarklet: "../bookmarklet-public.js",
-    bookmarkletTitle: "Public-account bookmarklet",
+    bookmarkletTitle: "public bookmarklet",
   },
 ];
 export const COPY_PAGE_TARGET = "../copy.html";
@@ -38,10 +38,10 @@ function escapeJsonForScript(value) {
 
 function formatBytes(value) {
   if (value < 1024) {
-    return `${value} B`;
+    return `${value} b`;
   }
 
-  return `${Math.round(value / 102.4) / 10} KB`;
+  return `${Math.round(value / 102.4) / 10} kb`;
 }
 
 export async function getCopyItems() {
@@ -56,16 +56,16 @@ export async function getCopyItems() {
       title: target.title,
       description: target.description,
       file: target.source.replace("../", ""),
-      buttonLabel: "Copy script to clipboard",
+      buttonLabel: "copy script",
       content: source,
       size: formatBytes(Buffer.byteLength(source, "utf8")),
     });
     items.push({
       id: `${target.id}-bookmarklet`,
       title: target.bookmarkletTitle,
-      description: "Paste this into a browser bookmark URL, then click it while viewing the Instagram profile.",
+      description: "paste into a bookmark url.",
       file: target.bookmarklet.replace("../", ""),
-      buttonLabel: "Copy bookmarklet to clipboard",
+      buttonLabel: "copy bookmarklet",
       content: bookmarklet,
       size: formatBytes(Buffer.byteLength(bookmarklet, "utf8")),
     });
@@ -85,20 +85,23 @@ export function toCopyPage(items) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Instagram Follow Back Checker - Copy Scripts</title>
+  <title>instagram follow back checker - copy scripts</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f6f8fb;
-      --panel: #ffffff;
-      --text: #172033;
-      --muted: #5d6b82;
-      --border: #d7deea;
-      --primary: #0f766e;
-      --primary-strong: #115e59;
-      --accent: #2563eb;
-      --warn: #b45309;
-      --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      color-scheme: dark;
+      --bg: #080807;
+      --panel: #12110f;
+      --panel-soft: #171512;
+      --text: #f4f1ea;
+      --muted: #a59e93;
+      --quiet: #746d64;
+      --border: #2a2722;
+      --primary: #f4f1ea;
+      --primary-strong: #ffffff;
+      --primary-text: #11100e;
+      --accent: #98d8aa;
+      --warn: #f0b36a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
     }
 
     * {
@@ -110,23 +113,25 @@ export function toCopyPage(items) {
       background: var(--bg);
       color: var(--text);
       font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-x: hidden;
     }
 
     main {
-      width: min(1080px, calc(100vw - 32px));
+      width: min(960px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 28px 0 40px;
+      padding: 56px 0 64px;
     }
 
     header {
       display: grid;
-      gap: 10px;
-      margin-bottom: 20px;
+      gap: 14px;
+      max-width: 680px;
+      margin-bottom: 28px;
     }
 
     h1 {
       margin: 0;
-      font-size: 30px;
+      font-size: clamp(38px, 8vw, 72px);
       line-height: 1.1;
       letter-spacing: 0;
     }
@@ -134,28 +139,32 @@ export function toCopyPage(items) {
     p {
       margin: 0;
       color: var(--muted);
-      max-width: 780px;
+      max-width: 620px;
     }
 
     .notice {
-      margin: 18px 0;
-      padding: 12px 14px;
-      border: 1px solid #f3c982;
+      display: inline-flex;
+      width: fit-content;
+      max-width: 100%;
+      margin: 4px 0 28px;
+      padding: 8px 11px;
+      border: 1px solid #4a3a24;
       border-radius: 8px;
-      background: #fff8e8;
-      color: #5f3b08;
+      background: #18120b;
+      color: var(--warn);
+      font-size: 13px;
     }
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
     }
 
     .item {
       display: grid;
-      gap: 12px;
-      min-height: 220px;
+      gap: 18px;
+      min-height: 190px;
       padding: 16px;
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -165,12 +174,12 @@ export function toCopyPage(items) {
 
     .item-head {
       display: grid;
-      gap: 5px;
+      gap: 8px;
     }
 
     h2 {
       margin: 0;
-      font-size: 18px;
+      font-size: 19px;
       line-height: 1.25;
       letter-spacing: 0;
     }
@@ -179,13 +188,14 @@ export function toCopyPage(items) {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      color: var(--muted);
-      font-size: 13px;
+      color: var(--quiet);
+      font-size: 12px;
     }
 
     .meta code {
-      color: #334155;
-      background: #edf2f7;
+      color: var(--muted);
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
       border-radius: 5px;
       padding: 2px 6px;
     }
@@ -208,7 +218,7 @@ export function toCopyPage(items) {
       border: 1px solid transparent;
       border-radius: 7px;
       background: var(--primary);
-      color: white;
+      color: var(--primary-text);
       font: inherit;
       font-weight: 650;
       text-decoration: none;
@@ -222,8 +232,8 @@ export function toCopyPage(items) {
 
     a.button.secondary,
     button.secondary {
-      background: white;
-      color: var(--accent);
+      background: transparent;
+      color: var(--muted);
       border-color: var(--border);
     }
 
@@ -231,13 +241,14 @@ export function toCopyPage(items) {
     button.secondary:hover,
     a.button.secondary:focus-visible,
     button.secondary:focus-visible {
-      background: #eef5ff;
+      background: var(--panel-soft);
+      color: var(--text);
     }
 
     .status {
       min-height: 24px;
-      margin: 16px 0 0;
-      color: var(--primary-strong);
+      margin: 18px 0 0;
+      color: var(--accent);
       font-weight: 650;
     }
 
@@ -252,7 +263,7 @@ export function toCopyPage(items) {
       padding: 12px;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: white;
+      background: var(--panel);
       box-shadow: var(--shadow);
     }
 
@@ -267,30 +278,52 @@ export function toCopyPage(items) {
       border: 1px solid var(--border);
       border-radius: 7px;
       padding: 10px;
+      background: #0d0c0b;
       color: var(--text);
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        width: min(358px, calc(100% - 32px));
+        margin-left: 16px;
+        margin-right: auto;
+        padding: 48px 0 44px;
+      }
+
+      header {
+        margin-bottom: 24px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .item {
+        min-height: auto;
+      }
     }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <h1>Copy Instagram Follow Back Checker</h1>
-      <p>Click the copy button you need, then paste into the Instagram DevTools Console or into a bookmark URL.</p>
+      <h1>copy the checker.</h1>
+      <p>pick a script, copy it, paste it into instagram. nothing installs.</p>
     </header>
 
-    <div class="notice">Only run browser-console scripts you trust. These scripts run locally in your current Instagram browser session. If clipboard access is blocked, this page opens a manual copy box.</div>
+    <div class="notice">runs locally in your browser session.</div>
 
     <section id="items" class="grid" aria-live="polite"></section>
     <div id="status" class="status" role="status"></div>
   </main>
 
-  <section id="fallback" class="fallback" aria-label="Manual copy fallback">
-    <strong>Manual copy</strong>
+  <section id="fallback" class="fallback" aria-label="manual copy fallback">
+    <strong>manual copy</strong>
     <textarea id="fallbackText" readonly></textarea>
     <div class="actions">
-      <button id="selectFallback" type="button">Select text</button>
-      <button id="closeFallback" type="button" class="secondary">Close</button>
+      <button id="selectFallback" type="button">select text</button>
+      <button id="closeFallback" type="button" class="secondary">close</button>
     </div>
   </section>
 
@@ -304,7 +337,7 @@ export function toCopyPage(items) {
 
     function setStatus(message, isError = false) {
       statusEl.textContent = message;
-      statusEl.style.color = isError ? "#b45309" : "#115e59";
+      statusEl.style.color = isError ? "#f0b36a" : "#98d8aa";
     }
 
     function showFallback(text) {
@@ -312,7 +345,7 @@ export function toCopyPage(items) {
       fallbackEl.classList.add("visible");
       fallbackText.focus();
       fallbackText.select();
-      setStatus("Clipboard access was blocked. Select and copy from the manual box.", true);
+      setStatus("clipboard access was blocked. select and copy from the manual box.", true);
     }
 
     async function copyText(item) {
@@ -360,7 +393,7 @@ export function toCopyPage(items) {
       const copy = document.createElement("button");
       copy.type = "button";
       copy.textContent = item.buttonLabel;
-      copy.setAttribute("aria-label", "Copy " + item.title + " to clipboard");
+      copy.setAttribute("aria-label", "copy " + item.title + " to clipboard");
       copy.addEventListener("click", () => copyText(item));
 
       const open = document.createElement("a");
@@ -368,7 +401,7 @@ export function toCopyPage(items) {
       open.href = item.file;
       open.target = "_blank";
       open.rel = "noreferrer";
-      open.textContent = "View source";
+      open.textContent = "view source";
 
       actions.append(copy, open);
       article.append(head, actions);

@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Simplified the README copy flow with a rendered helper link and clearer clipboard-copy button labels.
+- simplified the README copy flow with a rendered helper link and clearer clipboard-copy button labels.
+- restyled the copy helper landing page with a dark, minimal design and shorter action labels.
 
 ## v1.3.0 - 2026-06-30
 

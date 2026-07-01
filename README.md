@@ -6,7 +6,7 @@ By [dongt10](https://github.com/dongt10).
 
 ## Easy Copy
 
-Open the rendered helper page: [Copy Instagram Follow Back Checker](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html).
+Open the rendered helper page: [copy instagram follow back checker](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html).
 
 Click the button for the script or bookmarklet you want. It copies to your clipboard automatically; if the browser blocks clipboard access, the page shows a manual copy box.
 
@@ -50,7 +50,7 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 3. Open DevTools Console:
    - macOS: `Command + Option + J`
    - Windows/Linux: `Ctrl + Shift + J`
-4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html) and click **Copy script to clipboard** for the self-check script, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
+4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html) and click **copy script** for the self-check script, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
 5. Press Enter.
 
 The page shows a progress overlay (including a live request count and current pacing) while it loads relationship lists and verifies tentative misses. When it finishes, the page is replaced with a result report.
