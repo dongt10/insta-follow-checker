@@ -6,7 +6,7 @@ By [dongt10](https://github.com/dongt10).
 
 ## Easy Copy
 
-Open the rendered helper page: [copy instagram follow back checker](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html).
+Open the rendered helper page: [copy instagram follow back checker](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=1814cd0).
 
 Click the button for the script or bookmarklet you want. It copies to your clipboard automatically; if the browser blocks clipboard access, the page shows a manual copy box.
 
@@ -50,7 +50,7 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 3. Open DevTools Console:
    - macOS: `Command + Option + J`
    - Windows/Linux: `Ctrl + Shift + J`
-4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html) and click **copy script** for the self-check script, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
+4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=1814cd0) and click **copy script** for the self-check script, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
 5. Press Enter.
 
 The page shows a progress overlay (including a live request count and current pacing) while it loads relationship lists and verifies tentative misses. When it finishes, the page is replaced with a result report.
@@ -100,7 +100,7 @@ For large accounts, avoid setting delays too low. Instagram can rate-limit or lo
 
 ## Bookmarklet
 
-If you prefer a bookmarklet, copy it from the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html) or use the one-line version in [bookmarklet.js](bookmarklet.js).
+If you prefer a bookmarklet, copy it from the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=1814cd0) or use the one-line version in [bookmarklet.js](bookmarklet.js).
 
 Create a new bookmark, paste the contents of `bookmarklet.js` into the URL field, then click that bookmark while you are on the Instagram profile page you want to check.
 
@@ -180,6 +180,6 @@ Note: this script also works on your own account, but [src/check-follow-back.js]
 
 Only run browser-console scripts you trust. These scripts are intentionally plain JavaScript with no dependencies so they can be inspected before running.
 
-## License
+## license
 
-MIT
+[mit](LICENSE)
