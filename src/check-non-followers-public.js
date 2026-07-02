@@ -817,20 +817,18 @@
       : "<li>none</li>";
   }
 
-  function statCard(label, value, accent = false) {
+  function statLine(label, value, accent = false) {
     const display = typeof value === "number" ? formatNumber(value) : (value || "unknown");
 
-    return `<div class="card${accent ? " accent" : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
+    return `<div class="stat${accent ? " accent" : ""}"><span>${escapeHtml(label)}</span><span>${escapeHtml(display)}</span></div>`;
   }
 
-  function section(title, accounts, columns) {
-    return `<h2>${escapeHtml(title)} (${accounts.length})</h2><ol class="${columns ? "cols" : ""}">${resultLines(accounts)}</ol>`;
+  function section(title, accounts) {
+    return `<h2>${escapeHtml(title)} (${accounts.length})</h2><ul class="list">${resultLines(accounts)}</ul>`;
   }
 
   function renderFinalReport(result) {
-    const warningItems = result.warnings.length
-      ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
-      : "<li>none</li>";
+    const warningLines = result.warnings.map((warning) => `<div class="warn-line">! ${escapeHtml(warning)}</div>`).join("");
     const passRows = result.loadPasses.map((pass) => `
       <tr>
         <td>${escapeHtml(pass.kind)}</td>
@@ -842,18 +840,16 @@
         <td>${escapeHtml(pass.status)}</td>
       </tr>
     `).join("");
-    const unconfirmedSection = result.unconfirmed.length
-      ? section("not following back - unconfirmed", result.unconfirmed, true)
+    const unconfirmedSection = result.unconfirmed.length ? section("unconfirmed", result.unconfirmed) : "";
+    const rescuedSection = result.rescued.length ? section("follows back", result.rescued) : "";
+    const unknownSection = result.unknown.length ? section("unknown", result.unknown) : "";
+    const bonusSection = result.fansNotFollowedBack ? section("bonus: fans they don't follow back", result.fansNotFollowedBack) : "";
+    const loadedFollowers = typeof result.loaded.followers === "number" ? formatNumber(result.loaded.followers) : (result.loaded.followers || "unknown");
+    const loadedFollowing = typeof result.loaded.following === "number" ? formatNumber(result.loaded.following) : (result.loaded.following || "unknown");
+    const unconfirmedFootnote = result.unconfirmed.length
+      ? ` "unconfirmed" accounts could not be proven because instagram did not expose the full follower list — rerun later to confirm them.`
       : "";
-    const rescuedSection = result.rescued.length
-      ? section("actually follows back - removed from misses", result.rescued, true)
-      : "";
-    const unknownSection = result.unknown.length
-      ? section("unknown - verification blocked", result.unknown, false)
-      : "";
-    const bonusSection = result.fansNotFollowedBack
-      ? section("bonus: followers you (the target) do not follow back", result.fansNotFollowedBack, true)
-      : "";
+    const divider = '<div class="divider">──────────────────────────────────────</div>';
 
     document.getElementById("ig-non-followers-progress-box")?.remove?.();
     document.title = `instagram non-followers - @${result.target.username}`;
@@ -862,68 +858,73 @@
         :root {
           color-scheme: dark;
           --bg: #080807;
-          --panel: #12110f;
-          --panel-soft: #171512;
           --text: #f4f1ea;
           --muted: #a59e93;
           --quiet: #746d64;
+          --faint: #4a453f;
           --border: #2a2722;
           --accent: #98d8aa;
           --warn: #f0b36a;
         }
         * { box-sizing: border-box; }
-        body { margin: 24px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        h1 { margin: 0 0 10px; font-size: 28px; font-weight: 650; }
-        h2 { margin: 24px 0 10px; font-size: 18px; font-weight: 650; color: var(--text); }
-        p { max-width: 880px; color: var(--muted); }
-        p strong { color: var(--text); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; max-width: 1000px; }
-        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-        .card span { display: block; color: var(--muted); font-size: 13px; }
-        .card strong { display: block; margin-top: 5px; font-size: 23px; color: var(--text); }
-        .card.accent strong { color: var(--accent); }
-        .warn { max-width: 1000px; background: #18120b; border: 1px solid #4a3a24; border-radius: 8px; padding: 12px 14px; margin: 16px 0; color: var(--warn); }
-        .warn strong { color: var(--warn); }
-        .warn ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
-        .cols { columns: 2 320px; }
-        li { break-inside: avoid; margin: 5px 0; }
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        details { max-width: 1000px; margin: 24px 0; }
-        summary { cursor: pointer; color: var(--quiet); font-size: 13px; padding: 4px 0; }
-        table { border-collapse: collapse; background: var(--panel-soft); border: 1px solid var(--border); margin-top: 10px; font-size: 12px; }
-        th, td { padding: 6px 9px; border: 1px solid var(--border); text-align: left; color: var(--muted); }
-        th { color: var(--quiet); font-weight: 600; }
-        code { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        body { margin: 32px 24px; background: var(--bg); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.85; }
+        h1 { font-size: 13px; font-weight: 400; margin: 0; color: var(--text); }
+        h1 .prompt { color: var(--accent); }
+        h2 { font-size: 13px; font-weight: 400; margin: 18px 0 6px; color: var(--text); }
+        h2::before { content: "> "; color: var(--faint); }
+        .divider { color: var(--border); margin: 14px 0; user-select: none; }
+        .stat { display: flex; justify-content: space-between; max-width: 320px; }
+        .stat span:last-child { color: var(--text); }
+        .stat.accent span:first-child, .stat.accent span:last-child { color: var(--accent); }
+        .stat.accent span:last-child { font-weight: 600; }
+        .meta { color: var(--quiet); font-size: 12px; margin-top: 8px; }
+        .warn-line { color: var(--warn); margin-top: 4px; }
+        ul.list { list-style: none; margin: 6px 0 0; padding: 0; columns: 2 240px; column-gap: 24px; }
+        ul.list li { break-inside: avoid; margin: 2px 0; }
+        ul.list a { color: var(--accent); text-decoration: none; }
+        ul.list a:hover { text-decoration: underline; }
+        details { margin-top: 14px; }
+        summary { cursor: pointer; color: var(--quiet); font-size: 12px; list-style: none; }
+        summary::-webkit-details-marker { display: none; }
+        summary::before { content: "▸ "; color: var(--faint); }
+        details[open] summary::before { content: "▾ "; }
+        .footnote { color: #5f5950; font-size: 12px; margin-top: 8px; padding-left: 14px; line-height: 1.7; max-width: 620px; }
+        table { border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        th, td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); text-align: left; color: var(--muted); }
+        th { color: var(--quiet); font-weight: 400; }
+        code { color: var(--muted); }
+        @media (max-width: 640px) { ul.list { columns: 1; } }
       </style>
-      <h1>instagram non-followers: @${escapeHtml(result.target.username)}</h1>
-      <p>accounts @${escapeHtml(result.target.username)} follows that do <strong>not</strong> follow back. "confirmed" is exact: the follower list was read completely, so the difference is definitive. ${result.unconfirmed.length ? "\"unconfirmed\" accounts could not be proven because instagram did not expose the full follower list - rerun later to confirm them." : ""}</p>
-      <p><strong>follower list read:</strong> ${escapeHtml(result.followerListComplete ? "complete (exact result)" : "incomplete (some accounts unconfirmed)")} | <strong>verification:</strong> ${escapeHtml(result.verificationMode)}</p>
-      <div class="grid">
-        ${statCard("profile following", result.profileCounts.following)}
-        ${statCard("loaded following", result.loaded.following)}
-        ${statCard("profile followers", result.profileCounts.followers)}
-        ${statCard("loaded followers", result.loaded.followers)}
-        ${statCard("not following back (confirmed)", result.confirmed.length, true)}
-        ${statCard("unconfirmed", result.unconfirmed.length)}
-        ${statCard("follows back (removed)", result.rescued.length)}
-        ${statCard("unknown", result.unknown.length)}
-        ${statCard("requests made", result.requestsMade)}
-      </div>
-      <div class="warn"><strong>warnings</strong><ul>${warningItems}</ul></div>
-      ${section("not following back - confirmed", result.confirmed, true)}
+      <h1><span class="prompt">$ result</span> @${escapeHtml(result.target.username)}</h1>
+      ${divider}
+      ${statLine("not following back", result.confirmed.length, true)}
+      ${statLine("unconfirmed", result.unconfirmed.length)}
+      ${statLine("follows back", result.rescued.length)}
+      ${statLine("unknown", result.unknown.length)}
+      <div class="meta">${result.followerListComplete ? "complete" : "incomplete"} follower list · ${escapeHtml(result.verificationMode)} · ${escapeHtml(formatNumber(result.requestsMade))} requests</div>
+      ${warningLines}
+      ${divider}
+      ${section("not following back", result.confirmed)}
       ${unconfirmedSection}
       ${rescuedSection}
       ${unknownSection}
       ${bonusSection}
+      ${divider}
+      <details>
+        <summary>how this works</summary>
+        <div class="footnote">
+          accounts @${escapeHtml(result.target.username)} follows that do not follow back. "confirmed" is exact — the follower list was read completely.${unconfirmedFootnote}<br>
+          profile: ${escapeHtml(formatNumber(result.profileCounts.followers))} followers · ${escapeHtml(formatNumber(result.profileCounts.following))} following. loaded: ${escapeHtml(loadedFollowers)} followers · ${escapeHtml(loadedFollowing)} following.
+        </div>
+      </details>
       <details>
         <summary>load passes (debug)</summary>
         <table>
           <thead><tr><th>kind</th><th>pass</th><th>count</th><th>pages</th><th>total</th><th>added</th><th>status</th></tr></thead>
           <tbody>${passRows}</tbody>
         </table>
+        <p>full structured results are in <code>window.IG_NON_FOLLOWERS_RESULTS</code> until this page is reloaded.</p>
       </details>
-      <p>full structured results are in <code>window.IG_NON_FOLLOWERS_RESULTS</code> until this page is reloaded.</p>
     `;
   }
 
