@@ -138,21 +138,21 @@ vm.runInContext(source, context);
 
 for (
   let index = 0;
-  index < 100 && !bodyHtml.includes("verified not following back (1)");
+  index < 100 && !bodyHtml.includes("not following back (1)");
   index += 1
 ) {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-if (!bodyHtml.includes("verified not following back (1)") || !bodyHtml.includes("@carol")) {
+if (!bodyHtml.includes("not following back (1)") || !bodyHtml.includes("@carol")) {
   throw new Error(`expected carol to be verified as not following back:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("follows back - corrected (2)")) {
+if (!bodyHtml.includes("follows back (2)")) {
   throw new Error(`expected alice and bob to be corrected by the batch check:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("unknown - not counted (0)")) {
+if (!bodyHtml.includes("unknown (0)")) {
   throw new Error(`expected no unknown results:\n${bodyHtml}`);
 }
 

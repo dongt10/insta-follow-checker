@@ -114,13 +114,13 @@ vm.runInContext(source, context);
 
 for (
   let index = 0;
-  index < 100 && !bodyHtml.includes("instagram follow-back result");
+  index < 100 && !bodyHtml.includes("$ result");
   index += 1
 ) {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-if (!bodyHtml.includes("verified not following back (0)")) {
+if (!bodyHtml.includes("not following back (0)")) {
   throw new Error(`HTML follower wall should not count misses:\n${bodyHtml}`);
 }
 

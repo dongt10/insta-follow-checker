@@ -1294,10 +1294,10 @@
       : "<li>none</li>";
   }
 
-  function statCard(label, value, accent = false) {
+  function statLine(label, value, accent = false) {
     const display = typeof value === "number" ? formatNumber(value) : (value || "unknown");
 
-    return `<div class="card${accent ? " accent" : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
+    return `<div class="stat${accent ? " accent" : ""}"><span>${escapeHtml(label)}</span><span>${escapeHtml(display)}</span></div>`;
   }
 
   function optionalFollowingHintReport(hints) {
@@ -1307,22 +1307,14 @@
 
     return `
       <h2>instagram following-feed hint (${hints.notFollowingBack.length})</h2>
-      <p>this is the same <code>follows_viewer</code> signal many simpler console tools use. it is shown for comparison and as extra verification input; the verified sections above remain the counted result.</p>
-      <div class="grid">
-        ${statCard("hint also verified missing", hints.verifiedMissing.length)}
-        ${statCard("hint corrected as follows back", hints.corrected.length)}
-        ${statCard("hint unknown", hints.unknown.length)}
-        ${statCard("hint not verified", hints.unresolved.length)}
-      </div>
+      <div class="hint-line">${hints.verifiedMissing.length} verified missing · ${hints.corrected.length} corrected · ${hints.unknown.length} unknown · ${hints.unresolved.length} not verified</div>
       <h2>hint not verified as missing (${hints.notVerifiedMissing.length})</h2>
-      <ol class="cols">${resultLines(hints.notVerifiedMissing)}</ol>
+      <ul class="list">${resultLines(hints.notVerifiedMissing)}</ul>
     `;
   }
 
   function renderFinalReport(result) {
-    const warningItems = result.warnings.length
-      ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
-      : "<li>none</li>";
+    const warningLines = result.warnings.map((warning) => `<div class="warn-line">! ${escapeHtml(warning)}</div>`).join("");
     const passRows = result.loadPasses.map((pass) => `
       <tr>
         <td>${escapeHtml(pass.kind)}</td>
@@ -1335,6 +1327,12 @@
         <td>${escapeHtml(pass.status)}</td>
       </tr>
     `).join("");
+    const loadedFollowers = typeof result.loaded.followers === "number" ? formatNumber(result.loaded.followers) : (result.loaded.followers || "unknown");
+    const loadedFollowing = typeof result.loaded.following === "number" ? formatNumber(result.loaded.following) : (result.loaded.following || "unknown");
+    const hintFootnote = result.followingStatusHints?.available
+      ? ` instagram's following-feed hint (<code>follows_viewer</code>) is shown for comparison; the sections above remain the counted result.`
+      : "";
+    const divider = '<div class="divider">──────────────────────────────────────</div>';
 
     document.getElementById("ig-follow-back-progress-box")?.remove?.();
     document.title = `instagram follow-back result - @${result.target.username}`;
@@ -1343,71 +1341,75 @@
         :root {
           color-scheme: dark;
           --bg: #080807;
-          --panel: #12110f;
-          --panel-soft: #171512;
           --text: #f4f1ea;
           --muted: #a59e93;
           --quiet: #746d64;
+          --faint: #4a453f;
           --border: #2a2722;
           --accent: #98d8aa;
           --warn: #f0b36a;
         }
         * { box-sizing: border-box; }
-        body { margin: 24px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        h1 { margin: 0 0 10px; font-size: 28px; font-weight: 650; }
-        h2 { margin: 24px 0 10px; font-size: 18px; font-weight: 650; color: var(--text); }
-        p { max-width: 880px; color: var(--muted); }
-        p strong { color: var(--text); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; max-width: 1000px; }
-        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-        .card span { display: block; color: var(--muted); font-size: 13px; }
-        .card strong { display: block; margin-top: 5px; font-size: 23px; color: var(--text); }
-        .card.accent strong { color: var(--accent); }
-        .warn { max-width: 1000px; background: #18120b; border: 1px solid #4a3a24; border-radius: 8px; padding: 12px 14px; margin: 16px 0; color: var(--warn); }
-        .warn strong { color: var(--warn); }
-        .warn ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
-        .cols { columns: 2 320px; }
-        li { break-inside: avoid; margin: 5px 0; }
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        details { max-width: 1000px; margin: 24px 0; }
-        summary { cursor: pointer; color: var(--quiet); font-size: 13px; padding: 4px 0; }
-        table { border-collapse: collapse; background: var(--panel-soft); border: 1px solid var(--border); margin-top: 10px; font-size: 12px; }
-        th, td { padding: 6px 9px; border: 1px solid var(--border); text-align: left; color: var(--muted); }
-        th { color: var(--quiet); font-weight: 600; }
-        code { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        body { margin: 32px 24px; background: var(--bg); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.85; }
+        h1 { font-size: 13px; font-weight: 400; margin: 0; color: var(--text); }
+        h1 .prompt { color: var(--accent); }
+        h2 { font-size: 13px; font-weight: 400; margin: 18px 0 6px; color: var(--text); }
+        h2::before { content: "> "; color: var(--faint); }
+        .divider { color: var(--border); margin: 14px 0; user-select: none; }
+        .stat { display: flex; justify-content: space-between; max-width: 320px; }
+        .stat span:last-child { color: var(--text); }
+        .stat.accent span:first-child, .stat.accent span:last-child { color: var(--accent); }
+        .stat.accent span:last-child { font-weight: 600; }
+        .meta { color: var(--quiet); font-size: 12px; margin-top: 8px; }
+        .warn-line { color: var(--warn); margin-top: 4px; }
+        ul.list { list-style: none; margin: 6px 0 0; padding: 0; columns: 2 240px; column-gap: 24px; }
+        ul.list li { break-inside: avoid; margin: 2px 0; }
+        ul.list a { color: var(--accent); text-decoration: none; }
+        ul.list a:hover { text-decoration: underline; }
+        .hint-line { color: var(--muted); margin-top: 4px; }
+        details { margin-top: 14px; }
+        summary { cursor: pointer; color: var(--quiet); font-size: 12px; list-style: none; }
+        summary::-webkit-details-marker { display: none; }
+        summary::before { content: "▸ "; color: var(--faint); }
+        details[open] summary::before { content: "▾ "; }
+        .footnote { color: #5f5950; font-size: 12px; margin-top: 8px; padding-left: 14px; line-height: 1.7; max-width: 620px; }
+        table { border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+        th, td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); text-align: left; color: var(--muted); }
+        th { color: var(--quiet); font-weight: 400; }
+        code { color: var(--muted); }
+        @media (max-width: 640px) { ul.list { columns: 1; } }
       </style>
-      <h1>instagram follow-back result: @${escapeHtml(result.target.username)}</h1>
-      <p>only accounts in <strong>verified not following back</strong> are counted as misses. every tentative miss was verified with ${escapeHtml(result.verificationMethod)}; accounts that actually follow back were removed, and failures or auth issues are kept in unknown instead of being counted.</p>
-      <p><strong>verification method:</strong> ${escapeHtml(result.verificationMethod)}</p>
-      <div class="grid">
-        ${statCard("profile following", result.profileCounts.following)}
-        ${statCard("loaded following", result.loaded.following)}
-        ${statCard("profile followers", result.profileCounts.followers)}
-        ${statCard("loaded followers", result.loaded.followers)}
-        ${statCard("tentative misses checked", result.tentativeMisses)}
-        ${statCard("verified not following back", result.verifiedNotFollowingBack.length, true)}
-        ${statCard("follows back (corrected)", result.correctedByExactSearch.length)}
-        ${statCard("unknown, excluded", result.unknown.length)}
-        ${result.followingStatusHints?.available ? statCard("ig hint misses", result.followingStatusHints.notFollowingBack.length) : ""}
-        ${statCard("requests made", result.requestsMade)}
-      </div>
-      <div class="warn"><strong>warnings</strong><ul>${warningItems}</ul></div>
-      <h2>verified not following back (${result.verifiedNotFollowingBack.length})</h2>
-      <ol class="cols">${resultLines(result.verifiedNotFollowingBack)}</ol>
-      <h2>unknown - not counted (${result.unknown.length})</h2>
-      <ol>${resultLines(result.unknown)}</ol>
-      <h2>follows back - corrected (${result.correctedByExactSearch.length})</h2>
-      <ol class="cols">${resultLines(result.correctedByExactSearch)}</ol>
+      <h1><span class="prompt">$ result</span> @${escapeHtml(result.target.username)}</h1>
+      ${divider}
+      ${statLine("not following back", result.verifiedNotFollowingBack.length, true)}
+      ${statLine("follows back", result.correctedByExactSearch.length)}
+      ${statLine("unknown", result.unknown.length)}
+      <div class="meta">verified via ${escapeHtml(result.verificationMethod)} · ${escapeHtml(formatNumber(result.requestsMade))} requests</div>
+      ${warningLines}
+      ${divider}
+      <h2>not following back (${result.verifiedNotFollowingBack.length})</h2>
+      <ul class="list">${resultLines(result.verifiedNotFollowingBack)}</ul>
+      <h2>unknown (${result.unknown.length})</h2>
+      <ul class="list">${resultLines(result.unknown)}</ul>
+      <h2>follows back (${result.correctedByExactSearch.length})</h2>
+      <ul class="list">${resultLines(result.correctedByExactSearch)}</ul>
       ${optionalFollowingHintReport(result.followingStatusHints)}
+      ${divider}
+      <details>
+        <summary>how this works</summary>
+        <div class="footnote">
+          only "not following back" counts as a miss. every tentative miss was verified with ${escapeHtml(result.verificationMethod)}; accounts that actually follow back were removed, and failures or auth issues are kept in unknown instead of being counted.<br>
+          profile: ${escapeHtml(formatNumber(result.profileCounts.followers))} followers · ${escapeHtml(formatNumber(result.profileCounts.following))} following. loaded: ${escapeHtml(loadedFollowers)} followers · ${escapeHtml(loadedFollowing)} following.${hintFootnote}
+        </div>
+      </details>
       <details>
         <summary>load passes (debug)</summary>
         <table>
           <thead><tr><th>kind</th><th>pass</th><th>count</th><th>pages</th><th>before</th><th>after</th><th>added</th><th>status</th></tr></thead>
           <tbody>${passRows}</tbody>
         </table>
+        <p>full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
       </details>
-      <p>full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
     `;
   }
 

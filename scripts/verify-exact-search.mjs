@@ -142,7 +142,7 @@ vm.runInContext(source, context);
 
 for (
   let index = 0;
-  index < 100 && !bodyHtml.includes("verified not following back (1)");
+  index < 100 && !bodyHtml.includes("not following back (1)");
   index += 1
 ) {
   await new Promise((resolve) => setImmediate(resolve));
@@ -168,15 +168,15 @@ if (fetchCalls.includes("/api/v1/friendships/1/following/?count=50")) {
   throw new Error(`complete following list should skip the extra count=50 pass:\n${fetchCalls.join("\n")}`);
 }
 
-if (!bodyHtml.includes("verified not following back (1)") || !bodyHtml.includes("@carol")) {
+if (!bodyHtml.includes("not following back (1)") || !bodyHtml.includes("@carol")) {
   throw new Error(`expected carol to be verified as not following back:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("follows back - corrected (1)") || !bodyHtml.includes("@bob")) {
+if (!bodyHtml.includes("follows back (1)") || !bodyHtml.includes("@bob")) {
   throw new Error(`expected bob to be corrected by exact search:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("unknown - not counted (0)")) {
+if (!bodyHtml.includes("unknown (0)")) {
   throw new Error(`expected no unknown results:\n${bodyHtml}`);
 }
 

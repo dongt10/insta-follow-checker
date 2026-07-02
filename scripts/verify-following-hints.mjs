@@ -162,11 +162,11 @@ if (!urls.some((url) => url.startsWith("https://www.instagram.com/graphql/query/
   throw new Error(`expected the optional following-feed comparison to run:\n${urls.join("\n")}`);
 }
 
-if (!bodyHtml.includes("verified not following back (1)") || !bodyHtml.includes("@bob")) {
+if (!bodyHtml.includes("not following back (1)") || !bodyHtml.includes("@bob")) {
   throw new Error(`expected bob to be verified as not following back:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("follows back - corrected (2)") || !bodyHtml.includes("@carol")) {
+if (!bodyHtml.includes("follows back (2)") || !bodyHtml.includes("@carol")) {
   throw new Error(`expected carol to be corrected by batch verification:\n${bodyHtml}`);
 }
 
