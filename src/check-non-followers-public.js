@@ -814,13 +814,13 @@
   function resultLines(results) {
     return results.length
       ? results.map((account) => `<li><a href="https://www.instagram.com/${escapeHtml(account.username)}/" target="_blank" rel="noreferrer">@${escapeHtml(account.username)}</a> ${escapeHtml(account.fullName)}</li>`).join("")
-      : "<li>None</li>";
+      : "<li>none</li>";
   }
 
-  function statCard(label, value) {
+  function statCard(label, value, accent = false) {
     const display = typeof value === "number" ? formatNumber(value) : (value || "unknown");
 
-    return `<div class="card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
+    return `<div class="card${accent ? " accent" : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
   }
 
   function section(title, accounts, columns) {
@@ -830,7 +830,7 @@
   function renderFinalReport(result) {
     const warningItems = result.warnings.length
       ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
-      : "<li>None</li>";
+      : "<li>none</li>";
     const passRows = result.loadPasses.map((pass) => `
       <tr>
         <td>${escapeHtml(pass.kind)}</td>
@@ -843,64 +843,87 @@
       </tr>
     `).join("");
     const unconfirmedSection = result.unconfirmed.length
-      ? section("Not following back - unconfirmed", result.unconfirmed, true)
+      ? section("not following back - unconfirmed", result.unconfirmed, true)
       : "";
     const rescuedSection = result.rescued.length
-      ? section("Actually follows back - removed from misses", result.rescued, true)
+      ? section("actually follows back - removed from misses", result.rescued, true)
       : "";
     const unknownSection = result.unknown.length
-      ? section("Unknown - verification blocked", result.unknown, false)
+      ? section("unknown - verification blocked", result.unknown, false)
       : "";
     const bonusSection = result.fansNotFollowedBack
-      ? section("Bonus: followers you (the target) do not follow back", result.fansNotFollowedBack, true)
+      ? section("bonus: followers you (the target) do not follow back", result.fansNotFollowedBack, true)
       : "";
 
     document.getElementById("ig-non-followers-progress-box")?.remove?.();
-    document.title = `Instagram non-followers - @${result.target.username}`;
+    document.title = `instagram non-followers - @${result.target.username}`;
     document.body.innerHTML = `
       <style>
-        body { margin: 24px; background: #f8fafc; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        h1 { margin: 0 0 10px; font-size: 28px; }
-        h2 { margin: 24px 0 10px; font-size: 20px; }
-        p { max-width: 880px; }
+        :root {
+          color-scheme: dark;
+          --bg: #080807;
+          --panel: #12110f;
+          --panel-soft: #171512;
+          --text: #f4f1ea;
+          --muted: #a59e93;
+          --quiet: #746d64;
+          --border: #2a2722;
+          --accent: #98d8aa;
+          --warn: #f0b36a;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 24px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        h1 { margin: 0 0 10px; font-size: 28px; font-weight: 650; }
+        h2 { margin: 24px 0 10px; font-size: 18px; font-weight: 650; color: var(--text); }
+        p { max-width: 880px; color: var(--muted); }
+        p strong { color: var(--text); }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; max-width: 1000px; }
-        .card { background: white; border: 1px solid #dbe3ef; border-radius: 8px; padding: 14px; }
-        .card span { display: block; color: #475569; font-size: 13px; }
-        .card strong { display: block; margin-top: 5px; font-size: 23px; }
-        .warn { max-width: 1000px; background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 14px; margin: 16px 0; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+        .card span { display: block; color: var(--muted); font-size: 13px; }
+        .card strong { display: block; margin-top: 5px; font-size: 23px; color: var(--text); }
+        .card.accent strong { color: var(--accent); }
+        .warn { max-width: 1000px; background: #18120b; border: 1px solid #4a3a24; border-radius: 8px; padding: 12px 14px; margin: 16px 0; color: var(--warn); }
+        .warn strong { color: var(--warn); }
+        .warn ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
         .cols { columns: 2 320px; }
         li { break-inside: avoid; margin: 5px 0; }
-        a { color: #2563eb; text-decoration: none; }
-        table { border-collapse: collapse; background: white; border: 1px solid #dbe3ef; }
-        th, td { padding: 8px 10px; border: 1px solid #dbe3ef; text-align: left; }
-        code { background: #e2e8f0; border-radius: 4px; padding: 2px 5px; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        details { max-width: 1000px; margin: 24px 0; }
+        summary { cursor: pointer; color: var(--quiet); font-size: 13px; padding: 4px 0; }
+        table { border-collapse: collapse; background: var(--panel-soft); border: 1px solid var(--border); margin-top: 10px; font-size: 12px; }
+        th, td { padding: 6px 9px; border: 1px solid var(--border); text-align: left; color: var(--muted); }
+        th { color: var(--quiet); font-weight: 600; }
+        code { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       </style>
-      <h1>Instagram non-followers: @${escapeHtml(result.target.username)}</h1>
-      <p>Accounts @${escapeHtml(result.target.username)} follows that do <strong>not</strong> follow back. "Confirmed" is exact: the follower list was read completely, so the difference is definitive. ${result.unconfirmed.length ? "\"Unconfirmed\" accounts could not be proven because Instagram did not expose the full follower list - rerun later to confirm them." : ""}</p>
-      <p><strong>Follower list read:</strong> ${escapeHtml(result.followerListComplete ? "complete (exact result)" : "incomplete (some accounts unconfirmed)")} | <strong>Verification:</strong> ${escapeHtml(result.verificationMode)}</p>
+      <h1>instagram non-followers: @${escapeHtml(result.target.username)}</h1>
+      <p>accounts @${escapeHtml(result.target.username)} follows that do <strong>not</strong> follow back. "confirmed" is exact: the follower list was read completely, so the difference is definitive. ${result.unconfirmed.length ? "\"unconfirmed\" accounts could not be proven because instagram did not expose the full follower list - rerun later to confirm them." : ""}</p>
+      <p><strong>follower list read:</strong> ${escapeHtml(result.followerListComplete ? "complete (exact result)" : "incomplete (some accounts unconfirmed)")} | <strong>verification:</strong> ${escapeHtml(result.verificationMode)}</p>
       <div class="grid">
-        ${statCard("Profile following", result.profileCounts.following)}
-        ${statCard("Loaded following", result.loaded.following)}
-        ${statCard("Profile followers", result.profileCounts.followers)}
-        ${statCard("Loaded followers", result.loaded.followers)}
-        ${statCard("Not following back (confirmed)", result.confirmed.length)}
-        ${statCard("Unconfirmed", result.unconfirmed.length)}
-        ${statCard("Follows back (removed)", result.rescued.length)}
-        ${statCard("Unknown", result.unknown.length)}
-        ${statCard("Requests made", result.requestsMade)}
+        ${statCard("profile following", result.profileCounts.following)}
+        ${statCard("loaded following", result.loaded.following)}
+        ${statCard("profile followers", result.profileCounts.followers)}
+        ${statCard("loaded followers", result.loaded.followers)}
+        ${statCard("not following back (confirmed)", result.confirmed.length, true)}
+        ${statCard("unconfirmed", result.unconfirmed.length)}
+        ${statCard("follows back (removed)", result.rescued.length)}
+        ${statCard("unknown", result.unknown.length)}
+        ${statCard("requests made", result.requestsMade)}
       </div>
-      <div class="warn"><strong>Warnings</strong><ul>${warningItems}</ul></div>
-      ${section("Not following back - confirmed", result.confirmed, true)}
+      <div class="warn"><strong>warnings</strong><ul>${warningItems}</ul></div>
+      ${section("not following back - confirmed", result.confirmed, true)}
       ${unconfirmedSection}
       ${rescuedSection}
       ${unknownSection}
       ${bonusSection}
-      <h2>Load passes</h2>
-      <table>
-        <thead><tr><th>Kind</th><th>Pass</th><th>Count</th><th>Pages</th><th>Total</th><th>Added</th><th>Status</th></tr></thead>
-        <tbody>${passRows}</tbody>
-      </table>
-      <p>Full structured results are in <code>window.IG_NON_FOLLOWERS_RESULTS</code> until this page is reloaded.</p>
+      <details>
+        <summary>load passes (debug)</summary>
+        <table>
+          <thead><tr><th>kind</th><th>pass</th><th>count</th><th>pages</th><th>total</th><th>added</th><th>status</th></tr></thead>
+          <tbody>${passRows}</tbody>
+        </table>
+      </details>
+      <p>full structured results are in <code>window.IG_NON_FOLLOWERS_RESULTS</code> until this page is reloaded.</p>
     `;
   }
 

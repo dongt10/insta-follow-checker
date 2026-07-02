@@ -150,7 +150,7 @@ vm.runInContext(source, context);
 
 for (
   let index = 0;
-  index < 100 && !bodyHtml.includes("Instagram following-feed hint (2)");
+  index < 100 && !bodyHtml.includes("instagram following-feed hint (2)");
   index += 1
 ) {
   await new Promise((resolve) => setImmediate(resolve));
@@ -162,19 +162,19 @@ if (!urls.some((url) => url.startsWith("https://www.instagram.com/graphql/query/
   throw new Error(`expected the optional following-feed comparison to run:\n${urls.join("\n")}`);
 }
 
-if (!bodyHtml.includes("Verified not following back (1)") || !bodyHtml.includes("@bob")) {
+if (!bodyHtml.includes("verified not following back (1)") || !bodyHtml.includes("@bob")) {
   throw new Error(`expected bob to be verified as not following back:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("Follows back - corrected (2)") || !bodyHtml.includes("@carol")) {
+if (!bodyHtml.includes("follows back - corrected (2)") || !bodyHtml.includes("@carol")) {
   throw new Error(`expected carol to be corrected by batch verification:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("Instagram following-feed hint (2)")) {
+if (!bodyHtml.includes("instagram following-feed hint (2)")) {
   throw new Error(`expected the follows_viewer hint section:\n${bodyHtml}`);
 }
 
-if (!bodyHtml.includes("Hint not verified as missing (1)") || !bodyHtml.includes("likely source of differences")) {
+if (!bodyHtml.includes("hint not verified as missing (1)") || !bodyHtml.includes("likely source of differences")) {
   throw new Error(`expected the report to explain why simpler tools can show more:\n${bodyHtml}`);
 }
 

@@ -1291,13 +1291,13 @@
   function resultLines(results) {
     return results.length
       ? results.map((account) => `<li><a href="https://www.instagram.com/${escapeHtml(account.username)}/" target="_blank" rel="noreferrer">@${escapeHtml(account.username)}</a> ${escapeHtml(account.fullName)}</li>`).join("")
-      : "<li>None</li>";
+      : "<li>none</li>";
   }
 
-  function statCard(label, value) {
+  function statCard(label, value, accent = false) {
     const display = typeof value === "number" ? formatNumber(value) : (value || "unknown");
 
-    return `<div class="card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
+    return `<div class="card${accent ? " accent" : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(display)}</strong></div>`;
   }
 
   function optionalFollowingHintReport(hints) {
@@ -1306,15 +1306,15 @@
     }
 
     return `
-      <h2>Instagram following-feed hint (${hints.notFollowingBack.length})</h2>
-      <p>This is the same <code>follows_viewer</code> signal many simpler console tools use. It is shown for comparison and as extra verification input; the verified sections above remain the counted result.</p>
+      <h2>instagram following-feed hint (${hints.notFollowingBack.length})</h2>
+      <p>this is the same <code>follows_viewer</code> signal many simpler console tools use. it is shown for comparison and as extra verification input; the verified sections above remain the counted result.</p>
       <div class="grid">
-        ${statCard("Hint also verified missing", hints.verifiedMissing.length)}
-        ${statCard("Hint corrected as follows back", hints.corrected.length)}
-        ${statCard("Hint unknown", hints.unknown.length)}
-        ${statCard("Hint not verified", hints.unresolved.length)}
+        ${statCard("hint also verified missing", hints.verifiedMissing.length)}
+        ${statCard("hint corrected as follows back", hints.corrected.length)}
+        ${statCard("hint unknown", hints.unknown.length)}
+        ${statCard("hint not verified", hints.unresolved.length)}
       </div>
-      <h2>Hint not verified as missing (${hints.notVerifiedMissing.length})</h2>
+      <h2>hint not verified as missing (${hints.notVerifiedMissing.length})</h2>
       <ol class="cols">${resultLines(hints.notVerifiedMissing)}</ol>
     `;
   }
@@ -1322,7 +1322,7 @@
   function renderFinalReport(result) {
     const warningItems = result.warnings.length
       ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
-      : "<li>None</li>";
+      : "<li>none</li>";
     const passRows = result.loadPasses.map((pass) => `
       <tr>
         <td>${escapeHtml(pass.kind)}</td>
@@ -1337,54 +1337,77 @@
     `).join("");
 
     document.getElementById("ig-follow-back-progress-box")?.remove?.();
-    document.title = `Instagram follow-back result - @${result.target.username}`;
+    document.title = `instagram follow-back result - @${result.target.username}`;
     document.body.innerHTML = `
       <style>
-        body { margin: 24px; background: #f8fafc; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        h1 { margin: 0 0 10px; font-size: 28px; }
-        h2 { margin: 24px 0 10px; font-size: 20px; }
-        p { max-width: 880px; }
+        :root {
+          color-scheme: dark;
+          --bg: #080807;
+          --panel: #12110f;
+          --panel-soft: #171512;
+          --text: #f4f1ea;
+          --muted: #a59e93;
+          --quiet: #746d64;
+          --border: #2a2722;
+          --accent: #98d8aa;
+          --warn: #f0b36a;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 24px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        h1 { margin: 0 0 10px; font-size: 28px; font-weight: 650; }
+        h2 { margin: 24px 0 10px; font-size: 18px; font-weight: 650; color: var(--text); }
+        p { max-width: 880px; color: var(--muted); }
+        p strong { color: var(--text); }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; max-width: 1000px; }
-        .card { background: white; border: 1px solid #dbe3ef; border-radius: 8px; padding: 14px; }
-        .card span { display: block; color: #475569; font-size: 13px; }
-        .card strong { display: block; margin-top: 5px; font-size: 23px; }
-        .warn { max-width: 1000px; background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 14px; margin: 16px 0; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+        .card span { display: block; color: var(--muted); font-size: 13px; }
+        .card strong { display: block; margin-top: 5px; font-size: 23px; color: var(--text); }
+        .card.accent strong { color: var(--accent); }
+        .warn { max-width: 1000px; background: #18120b; border: 1px solid #4a3a24; border-radius: 8px; padding: 12px 14px; margin: 16px 0; color: var(--warn); }
+        .warn strong { color: var(--warn); }
+        .warn ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
         .cols { columns: 2 320px; }
         li { break-inside: avoid; margin: 5px 0; }
-        a { color: #2563eb; text-decoration: none; }
-        table { border-collapse: collapse; background: white; border: 1px solid #dbe3ef; }
-        th, td { padding: 8px 10px; border: 1px solid #dbe3ef; text-align: left; }
-        code { background: #e2e8f0; border-radius: 4px; padding: 2px 5px; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        details { max-width: 1000px; margin: 24px 0; }
+        summary { cursor: pointer; color: var(--quiet); font-size: 13px; padding: 4px 0; }
+        table { border-collapse: collapse; background: var(--panel-soft); border: 1px solid var(--border); margin-top: 10px; font-size: 12px; }
+        th, td { padding: 6px 9px; border: 1px solid var(--border); text-align: left; color: var(--muted); }
+        th { color: var(--quiet); font-weight: 600; }
+        code { background: var(--panel-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       </style>
-      <h1>Instagram follow-back result: @${escapeHtml(result.target.username)}</h1>
-      <p>Only accounts in <strong>Verified not following back</strong> are counted as misses. Every tentative miss was verified with ${escapeHtml(result.verificationMethod)}; accounts that actually follow back were removed, and failures or auth issues are kept in Unknown instead of being counted.</p>
-      <p><strong>Verification method:</strong> ${escapeHtml(result.verificationMethod)}</p>
+      <h1>instagram follow-back result: @${escapeHtml(result.target.username)}</h1>
+      <p>only accounts in <strong>verified not following back</strong> are counted as misses. every tentative miss was verified with ${escapeHtml(result.verificationMethod)}; accounts that actually follow back were removed, and failures or auth issues are kept in unknown instead of being counted.</p>
+      <p><strong>verification method:</strong> ${escapeHtml(result.verificationMethod)}</p>
       <div class="grid">
-        ${statCard("Profile following", result.profileCounts.following)}
-        ${statCard("Loaded following", result.loaded.following)}
-        ${statCard("Profile followers", result.profileCounts.followers)}
-        ${statCard("Loaded followers", result.loaded.followers)}
-        ${statCard("Tentative misses checked", result.tentativeMisses)}
-        ${statCard("Verified not following back", result.verifiedNotFollowingBack.length)}
-        ${statCard("Follows back (corrected)", result.correctedByExactSearch.length)}
-        ${statCard("Unknown, excluded", result.unknown.length)}
-        ${result.followingStatusHints?.available ? statCard("IG hint misses", result.followingStatusHints.notFollowingBack.length) : ""}
-        ${statCard("Requests made", result.requestsMade)}
+        ${statCard("profile following", result.profileCounts.following)}
+        ${statCard("loaded following", result.loaded.following)}
+        ${statCard("profile followers", result.profileCounts.followers)}
+        ${statCard("loaded followers", result.loaded.followers)}
+        ${statCard("tentative misses checked", result.tentativeMisses)}
+        ${statCard("verified not following back", result.verifiedNotFollowingBack.length, true)}
+        ${statCard("follows back (corrected)", result.correctedByExactSearch.length)}
+        ${statCard("unknown, excluded", result.unknown.length)}
+        ${result.followingStatusHints?.available ? statCard("ig hint misses", result.followingStatusHints.notFollowingBack.length) : ""}
+        ${statCard("requests made", result.requestsMade)}
       </div>
-      <div class="warn"><strong>Warnings</strong><ul>${warningItems}</ul></div>
-      <h2>Verified not following back (${result.verifiedNotFollowingBack.length})</h2>
+      <div class="warn"><strong>warnings</strong><ul>${warningItems}</ul></div>
+      <h2>verified not following back (${result.verifiedNotFollowingBack.length})</h2>
       <ol class="cols">${resultLines(result.verifiedNotFollowingBack)}</ol>
-      <h2>Unknown - not counted (${result.unknown.length})</h2>
+      <h2>unknown - not counted (${result.unknown.length})</h2>
       <ol>${resultLines(result.unknown)}</ol>
-      <h2>Follows back - corrected (${result.correctedByExactSearch.length})</h2>
+      <h2>follows back - corrected (${result.correctedByExactSearch.length})</h2>
       <ol class="cols">${resultLines(result.correctedByExactSearch)}</ol>
       ${optionalFollowingHintReport(result.followingStatusHints)}
-      <h2>Load passes</h2>
-      <table>
-        <thead><tr><th>Kind</th><th>Pass</th><th>Count</th><th>Pages</th><th>Before</th><th>After</th><th>Added</th><th>Status</th></tr></thead>
-        <tbody>${passRows}</tbody>
-      </table>
-      <p>Full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
+      <details>
+        <summary>load passes (debug)</summary>
+        <table>
+          <thead><tr><th>kind</th><th>pass</th><th>count</th><th>pages</th><th>before</th><th>after</th><th>added</th><th>status</th></tr></thead>
+          <tbody>${passRows}</tbody>
+        </table>
+      </details>
+      <p>full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
     `;
   }
 
