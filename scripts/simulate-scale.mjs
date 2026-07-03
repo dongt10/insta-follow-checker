@@ -766,4 +766,54 @@ const SELF_ID = "42";
   report(secondRun);
 }
 
+{
+  const following = [];
+
+  for (let id = 1; id <= 600; id += 1) {
+    following.push(makeAccount(id, "burst"));
+  }
+
+  const followBack = following.slice(0, 550);
+  const groundTruthFollowerIds = new Set(followBack.map((user) => user.pk));
+  const expectedMisses = following.slice(550).map((user) => user.username);
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "E: self-check at full speed, breathers fire and the request floor holds",
+    profile: { id: SELF_ID, username: "burstself", followerCount: 5000, followingCount: 600 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds,
+    viewerId: SELF_ID,
+    storage,
+    config: {
+      relationshipListDelayMs: 100,
+      batchDelayMs: 100,
+      minRequestIntervalMs: 600,
+      breatherEveryRequests: 8,
+      breatherMs: 15000,
+    },
+    walls: null,
+  });
+
+  assertExactSet(run.name, run.results.verifiedNotFollowingBack, expectedMisses);
+
+  if (!run.sleeps.some((ms) => ms >= 12000)) {
+    throw new Error("E: expected at least one breather sleep of >= 12000 virtual ms");
+  }
+
+  if (!run.state.logs.some((entry) => entry.message.includes("breather"))) {
+    throw new Error("E: expected a breather progress message");
+  }
+
+  const gaps = run.fetchLog.slice(1).map((call, index) => call.at - run.fetchLog[index].at);
+  const minGap = Math.min(...gaps);
+
+  if (minGap < 600) {
+    throw new Error(`E: request floor violated, smallest gap ${minGap}ms`);
+  }
+
+  report(run);
+}
+
 console.log("scale simulation ok");

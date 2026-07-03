@@ -49,6 +49,8 @@
     resume: true,
     resumeTtlMs: 3600000,
     reverifySavedMisses: true,
+    breatherEveryRequests: 45,
+    breatherMs: 15000,
   };
   const CONFIG = Object.assign(
     {},
@@ -81,6 +83,8 @@
   CONFIG.minPaceFactor = clampConfigNumber(CONFIG.minPaceFactor, 0.05, 1, DEFAULT_CONFIG.minPaceFactor);
   CONFIG.paceSpeedupPerClean = clampConfigNumber(CONFIG.paceSpeedupPerClean, 0.5, 0.999, DEFAULT_CONFIG.paceSpeedupPerClean);
   CONFIG.wallSlowdownMultiplier = clampConfigNumber(CONFIG.wallSlowdownMultiplier, 1, 10, DEFAULT_CONFIG.wallSlowdownMultiplier);
+  CONFIG.breatherEveryRequests = Math.floor(clampConfigNumber(CONFIG.breatherEveryRequests, 0, Number.MAX_SAFE_INTEGER, DEFAULT_CONFIG.breatherEveryRequests));
+  CONFIG.breatherMs = clampConfigNumber(CONFIG.breatherMs, 0, 600000, DEFAULT_CONFIG.breatherMs);
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalizeUsername = (value) => String(value || "").trim().toLowerCase();
@@ -117,9 +121,16 @@
   window.IG_FOLLOW_BACK_STATE = state;
   window.IG_OVER1K_STATE = state;
 
+  const breatherTarget = () => Math.max(
+    1,
+    Math.round(CONFIG.breatherEveryRequests * (0.8 + Math.random() * 0.4)),
+  );
+
   const pacing = {
     paceFactor: 1,
     lastRequestAt: 0,
+    requestsSinceBreather: 0,
+    nextBreatherAt: breatherTarget(),
   };
   let resumeSaveWarned = false;
 
@@ -165,6 +176,15 @@
   }
 
   async function throttleBeforeRequest() {
+    if (CONFIG.breatherEveryRequests > 0 && pacing.requestsSinceBreather >= pacing.nextBreatherAt) {
+      const breatherMs = jitter(CONFIG.breatherMs);
+
+      progress(`Taking a ~${Math.round(breatherMs / 1000)}s breather after ${pacing.requestsSinceBreather} requests to stay under Instagram's radar.`);
+      await sleep(breatherMs);
+      pacing.requestsSinceBreather = 0;
+      pacing.nextBreatherAt = breatherTarget();
+    }
+
     const minIntervalMs = CONFIG.minRequestIntervalMs * Math.max(1, pacing.paceFactor);
     const waitMs = pacing.lastRequestAt + minIntervalMs - Date.now();
 
@@ -173,6 +193,7 @@
     }
 
     pacing.lastRequestAt = Date.now();
+    pacing.requestsSinceBreather += 1;
   }
 
   function getCookie(name) {
