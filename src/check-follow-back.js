@@ -20,22 +20,25 @@
     targetUsername: "",
     relationshipPageSizes: [100, 50],
     relationshipPasses: 1,
-    relationshipListDelayMs: 1800,
-    exactSearchDelayMs: 2400,
+    relationshipListDelayMs: 1100,
+    exactSearchDelayMs: 1600,
     exactSearchMaxPages: 3,
     batchVerify: true,
     batchSize: 25,
-    batchDelayMs: 2600,
+    batchDelayMs: 1800,
     individualVerifyUnknowns: true,
-    individualDelayMs: 3200,
+    individualDelayMs: 2200,
     maxIndividualRechecks: 80,
     previousUnknownUsernames: [],
     skipFollowerListWhenSelf: "auto",
     includeFollowingStatusHints: true,
     compareFollowingFeed: false,
     followingFeedPageSize: 24,
-    followingFeedDelayMs: 1800,
-    minRequestIntervalMs: 700,
+    followingFeedDelayMs: 1100,
+    minRequestIntervalMs: 600,
+    minPaceFactor: 0.6,
+    paceSpeedupPerClean: 0.93,
+    wallSlowdownMultiplier: 3,
     retryLimit: 5,
     retryBaseDelayMs: 12000,
     retryMaxDelayMs: 180000,
@@ -69,6 +72,16 @@
     ),
   );
 
+  const clampConfigNumber = (value, min, max, fallback) => {
+    const parsed = Number(value);
+
+    return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+  };
+
+  CONFIG.minPaceFactor = clampConfigNumber(CONFIG.minPaceFactor, 0.05, 1, DEFAULT_CONFIG.minPaceFactor);
+  CONFIG.paceSpeedupPerClean = clampConfigNumber(CONFIG.paceSpeedupPerClean, 0.5, 0.999, DEFAULT_CONFIG.paceSpeedupPerClean);
+  CONFIG.wallSlowdownMultiplier = clampConfigNumber(CONFIG.wallSlowdownMultiplier, 1, 10, DEFAULT_CONFIG.wallSlowdownMultiplier);
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalizeUsername = (value) => String(value || "").trim().toLowerCase();
   const formatNumber = (value) => (
@@ -80,9 +93,7 @@
     ">": "&gt;",
     "\"": "&quot;",
   }[char]));
-  const jitter = (baseMs) => Math.round(
-    baseMs + Math.random() * Math.min(2500, Math.max(300, baseMs / 3)),
-  );
+  const jitter = (baseMs) => Math.round(baseMs * (0.85 + Math.random() * 0.35));
 
   const state = {
     startedAt: new Date().toISOString(),
@@ -91,6 +102,7 @@
     logs: [],
     requests: 0,
     walls: 0,
+    paceFactor: 1,
     done: false,
     debug: {
       batchResponseShapes: [],
@@ -106,33 +118,33 @@
   window.IG_OVER1K_STATE = state;
 
   const pacing = {
-    slowdownFactor: 1,
-    cleanStreak: 0,
+    paceFactor: 1,
     lastRequestAt: 0,
   };
   let resumeSaveWarned = false;
 
   function paceDelay(baseMs) {
-    return jitter(baseMs * pacing.slowdownFactor);
+    return jitter(baseMs * pacing.paceFactor);
   }
 
   function reportWall() {
     state.walls += 1;
-    pacing.cleanStreak = 0;
 
-    if (pacing.slowdownFactor < CONFIG.maxSlowdownFactor) {
-      pacing.slowdownFactor = Math.min(CONFIG.maxSlowdownFactor, pacing.slowdownFactor * 2);
-      progress(`Instagram is pushing back: slowing all requests to ${pacing.slowdownFactor}x spacing.`);
+    const raisedFactor = Math.min(
+      CONFIG.maxSlowdownFactor,
+      Math.max(pacing.paceFactor, 1) * CONFIG.wallSlowdownMultiplier,
+    );
+
+    if (raisedFactor > pacing.paceFactor) {
+      pacing.paceFactor = raisedFactor;
+      state.paceFactor = raisedFactor;
+      progress(`Instagram is pushing back: slowing to ${raisedFactor.toFixed(1)}x spacing (speeds back up while responses stay clean).`);
     }
   }
 
   function reportCleanResponse() {
-    pacing.cleanStreak += 1;
-
-    if (pacing.cleanStreak >= 25 && pacing.slowdownFactor > 1) {
-      pacing.slowdownFactor = Math.max(1, pacing.slowdownFactor / 2);
-      pacing.cleanStreak = 0;
-    }
+    pacing.paceFactor = Math.max(CONFIG.minPaceFactor, pacing.paceFactor * CONFIG.paceSpeedupPerClean);
+    state.paceFactor = pacing.paceFactor;
   }
 
   function setStatusBar(label, value = 0, max = 0) {
@@ -153,7 +165,7 @@
   }
 
   async function throttleBeforeRequest() {
-    const minIntervalMs = CONFIG.minRequestIntervalMs * pacing.slowdownFactor;
+    const minIntervalMs = CONFIG.minRequestIntervalMs * Math.max(1, pacing.paceFactor);
     const waitMs = pacing.lastRequestAt + minIntervalMs - Date.now();
 
     if (waitMs > 0) {
@@ -310,7 +322,7 @@
       <div style="font-weight:700;font-size:15px;margin-bottom:6px;">IG follow-back checker</div>
       <div><strong>Phase:</strong> ${escapeHtml(state.phase)}</div>
       <div><strong>Status:</strong> ${escapeHtml(state.message)}</div>
-      <div><strong>Requests:</strong> ${escapeHtml(state.requests)} | <strong>Pacing:</strong> ${escapeHtml(pacing.slowdownFactor)}x</div>
+      <div><strong>Requests:</strong> ${escapeHtml(state.requests)} | <strong>Pacing:</strong> ${escapeHtml(pacing.paceFactor.toFixed(1))}x</div>
       <div style="margin-top:10px;">
         <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:5px;color:#cbd5e1;font-size:12px;">
           <span>${escapeHtml(statusBar.label || state.phase || "Working")}</span>

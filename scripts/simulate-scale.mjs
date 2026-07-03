@@ -100,8 +100,10 @@ function runScenario({ name, profile, following, servedFollowers, groundTruthFol
       return 0;
     },
     fetch: async (url, init = {}) => {
+      const at = virtualNow;
+
       virtualNow += 300;
-      fetchLog.push({ url: String(url), init });
+      fetchLog.push({ url: String(url), init, at });
 
       const attempts = (attemptsByUrl.get(url) || 0) + 1;
 
@@ -218,6 +220,8 @@ function runScenario({ name, profile, following, servedFollowers, groundTruthFol
       fetchLog,
       durationMinutes: (virtualNow - startedAt) / 60000,
       requestCount: fetchLog.length,
+      state,
+      sleeps,
     };
   })();
 }
@@ -315,6 +319,24 @@ const SELF_ID = "42";
 
   if (storage.size !== 0) {
     throw new Error("A: resume state must be cleared after a clean run");
+  }
+
+  if (run.state.walls !== 2) {
+    throw new Error(`A: expected 2 walls, got ${run.state.walls}`);
+  }
+
+  const slowdownLogs = run.state.logs.filter((entry) => entry.message.includes("slowing to 3.0x spacing"));
+
+  if (slowdownLogs.length !== 2) {
+    throw new Error(`A: expected two 3.0x slowdown messages, got ${slowdownLogs.length}`);
+  }
+
+  if (!(run.state.paceFactor < 1.2)) {
+    throw new Error(`A: pace factor should recover below 1.2 by run end, got ${run.state.paceFactor}`);
+  }
+
+  if (run.durationMinutes > 3.5) {
+    throw new Error(`A: expected at most 3.5 simulated minutes, got ${run.durationMinutes.toFixed(1)}`);
   }
 
   report(run);
@@ -647,6 +669,10 @@ const SELF_ID = "42";
   }
 
   assertExactSet(run.name, run.results.verifiedNotFollowingBack, expectedMisses);
+
+  if (run.durationMinutes > 2.5) {
+    throw new Error(`B7: expected at most 2.5 simulated minutes, got ${run.durationMinutes.toFixed(1)}`);
+  }
 
   report(run);
 }
