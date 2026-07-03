@@ -3,9 +3,9 @@ import { pathToFileURL } from "node:url";
 
 export const BOOKMARKLET_TARGETS = [
   {
-    id: "self-script",
-    title: "self check",
-    description: "for your instagram profile, or anyone else's you can view.",
+    id: "checker",
+    title: "follow-back checker",
+    description: "for any instagram profile you can view.",
     source: "../src/check-follow-back.js",
     bookmarklet: "../bookmarklet.js",
     bookmarkletTitle: "bookmarklet",
