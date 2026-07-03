@@ -18,7 +18,7 @@ Source links: [script](https://raw.githubusercontent.com/dongt10/insta-follow-ch
 - Verifies every tentative miss individually before counting it:
   - **Your own account:** uses Instagram's batch friendship endpoint (`show_many`), which returns a definitive follows-you-back answer for ~25 accounts per request. This is both exact and far lighter on requests than paging the whole follower list.
   - **Someone else's account:** loads their follower list and exact-searches each tentative miss in it.
-- Paces every request: a minimum interval between requests, jittered delays, exponential backoff that honors `Retry-After` in full (including the HTTP-date form), and automatic slowdown (up to 8x spacing) whenever Instagram pushes back. Deterministic client errors are not retried at all.
+- Paces every request adaptively: requests start at a moderate spacing, speed up ~7% per clean response down to a floor, and take a short breather every ~45 requests. On any rate/HTML wall the spacing immediately triples (up to 8x), with exponential backoff that honors `Retry-After` in full (including the HTTP-date form), then gradually speeds back up while responses stay clean. A hard minimum interval between requests never shrinks. Deterministic client errors are not retried at all.
 - Skips requests it does not need: a relationship list that already loaded completely is not re-paged, self-checks only auto-skip the wall-prone bulk follower list when it is much larger than the following list, and if the following list is blocked outright the run stops before spending any follower requests.
 - Saves progress to `localStorage` (1 hour TTL, scoped to your login and the target): interrupted reruns can reuse loaded lists, partial pages, and verified follows-back corrections. Saved not-following-back verdicts are cross-checked live before they appear in the final list, so stale false positives are not reused blindly.
 - Prints only verified not-following-back accounts, with follows-back corrections and unknown results separated.
@@ -58,11 +58,18 @@ All settings are optional. Set them in the console before pasting the script:
 
 ```js
 window.IG_FOLLOW_BACK_CONFIG = {
-  relationshipListDelayMs: 1800,   // delay between relationship-list pages
-  exactSearchDelayMs: 2400,        // delay between exact follower searches
-  batchDelayMs: 2600,              // delay between batch friendship checks
-  individualDelayMs: 3200,         // delay between one-account friendship rechecks
-  minRequestIntervalMs: 700,       // hard minimum spacing between any two requests
+  relationshipListDelayMs: 1100,   // base delay between relationship-list pages
+  exactSearchDelayMs: 1600,        // base delay between exact follower searches
+  batchDelayMs: 1800,              // base delay between batch friendship checks
+  individualDelayMs: 2200,         // base delay between one-account friendship rechecks
+  minRequestIntervalMs: 600,       // hard minimum spacing between any two requests (never shrinks)
+  minPaceFactor: 0.6,              // fastest adaptive pacing: 0.6 = up to 40% quicker than the base delays
+  paceSpeedupPerClean: 0.93,       // each clean response multiplies pacing by this (lower = speeds up faster)
+  wallSlowdownMultiplier: 3,       // any wall multiplies pacing by this immediately
+  maxSlowdownFactor: 8,            // pacing ceiling after repeated walls
+  breatherEveryRequests: 45,       // pause for a breather roughly this often (0 disables)
+  breatherMs: 15000,               // breather length
+  listShortfallTolerance: 0.02,    // skip the extra list pass when a 400+ list is this close to the profile count
   batchVerify: true,               // use batch friendship checks on your own account
   batchSize: 25,                   // accounts per batch friendship check
   individualVerifyUnknowns: true,   // recheck unresolved batch results one by one
@@ -79,7 +86,7 @@ window.IG_FOLLOW_BACK_CONFIG = {
 };
 ```
 
-For large accounts, avoid setting delays too low. Instagram can rate-limit or log out fast request bursts. If a run does get walled, wait 10-15 minutes and rerun. Resume makes the rerun lighter, but saved not-following-back verdicts are verified again so stale misses do not become false positives.
+For large accounts, avoid setting delays too low. Instagram can rate-limit or log out fast request bursts. If a run does get walled, wait 10-15 minutes and rerun. Resume makes the rerun lighter, but saved not-following-back verdicts are verified again so stale misses do not become false positives. The adaptive pacing raises delays on its own the moment Instagram pushes back, so tune upward only if runs on your account keep hitting walls.
 
 ## Bookmarklet
 

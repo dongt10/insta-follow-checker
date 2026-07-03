@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Made request pacing adaptive: runs speed up while Instagram responds cleanly, slow down 3x immediately on any wall, recover gradually, and take a short breather every ~45 requests. Large-account runs finish 2-4x faster.
+- Skipped the redundant second list pass when a 400+ account list comes within 2% of the profile count (profile counts include deactivated accounts, so the re-page usually added nothing).
+- Lowered base delays (list pages 1.8s -> 1.1s, batch checks 2.6s -> 1.8s, exact searches 2.4s -> 1.6s, individual rechecks 3.2s -> 2.2s) with a hard 600ms floor between requests that never shrinks.
 - removed the public-account script, its bookmarklet, and related docs/tests. The self-check script already covers checking any account you can view; it is just slower and less guarded on accounts that are not your own, since Instagram's batch friendship endpoint only answers for yourself.
 - simplified the README copy flow with a rendered helper link and clearer clipboard-copy button labels.
 - restyled the copy helper landing page with a dark, minimal design and shorter action labels.
