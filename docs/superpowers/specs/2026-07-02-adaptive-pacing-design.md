@@ -60,7 +60,7 @@ Every `breatherEveryRequests` requests (default 45, jittered ±20%), `throttleBe
 ### 4. Shortfall tolerance for the second sweep
 
 New config `listShortfallTolerance: 0.02`. A list is treated as complete when
-`loaded >= expectedCount - max(3, ceil(expectedCount * listShortfallTolerance))`.
+`loaded >= expectedCount - tolerance`, where `tolerance = ceil(expectedCount * listShortfallTolerance)` for lists whose expected count is ≥ 400 and `0` otherwise. Small lists keep the exact-completeness rule: their re-sweep costs ~1 page, so there is nothing to save, and a fractional tolerance would skip legitimate re-sweeps on tiny lists (this also keeps `verify-exact-search.mjs`'s expected fetch sequence valid).
 
 - The close-enough check replaces `listIsComplete()` wherever it gates *additional sweeps*, so a 1,000-account list that serves 985 stops after the count=100 sweep instead of re-paging everything at count=50. Shortfalls beyond the tolerance still trigger the extra-page-size sweep — that is the real lossy-pagination safety net and it stays.
 - Resume state marks the list `complete` under the same tolerance, and the saved-list reuse check applies it too; otherwise a rerun within the TTL would re-page a list the tolerance already accepted.
@@ -81,7 +81,7 @@ Clamp on startup alongside the existing normalization: `minPaceFactor` to (0, 1]
 All in `scripts/simulate-scale.mjs` (virtual clock; timing assertions use generous upper bounds so jitter cannot flake):
 
 1. All existing scenario assertions stay green (including C2 resumed-run-lighter).
-2. New stale-count scenario: profile count 1,000, bulk serves 985 → assert no `count=50` list requests, run completes clean, resume state cleared.
+2. New stale-count scenario: profile count 1,000, bulk serves 985 → assert no `count=50` list requests, run completes clean, resume state cleared. Also covers the seeded-resume reuse case: a saved 985-account list marked complete is reused without any list requests even though the profile still claims 1,000.
 3. Wall-recovery scenario: one rate wall early in a long list load → assert `state.paceFactor` jumps to ≥3 and ends < 1.2 after the remaining clean responses.
 4. Breather: scenario configured with a small `breatherEveryRequests` → assert a sleep ≥ `0.8 * breatherMs` occurs between list requests.
 5. Hard floor: record a virtual timestamp per fetch in the sim; in a scenario configured with deliberately tiny phase delays (e.g. `relationshipListDelayMs: 100`) so the throttle is the binding constraint, assert the minimum gap between consecutive requests is ≥ `minRequestIntervalMs`.

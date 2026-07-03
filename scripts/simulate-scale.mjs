@@ -816,4 +816,80 @@ const SELF_ID = "42";
   report(run);
 }
 
+{
+  const following = [];
+
+  for (let id = 1; id <= 985; id += 1) {
+    following.push(makeAccount(id, "tol"));
+  }
+
+  const followBack = following.slice(0, 960);
+  const groundTruthFollowerIds = new Set(followBack.map((user) => user.pk));
+  const expectedMisses = following.slice(960).map((user) => user.username);
+  const storage = new Map();
+
+  const run = await runScenario({
+    name: "D1: self-check, profile count 1,000 but bulk serves 985, no wasted re-sweep",
+    profile: { id: SELF_ID, username: "tolself", followerCount: 5000, followingCount: 1000 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds,
+    viewerId: SELF_ID,
+    storage,
+    walls: null,
+  });
+
+  assertExactSet(run.name, run.results.verifiedNotFollowingBack, expectedMisses);
+
+  if (run.fetchLog.some((call) => call.url.includes("/following/?count=50"))) {
+    throw new Error("D1: a shortfall within tolerance must not trigger the count=50 re-sweep");
+  }
+
+  if (!run.results.warnings.some((warning) => warning.includes("exposed 985 of 1000"))) {
+    throw new Error(`D1: the exposed-count warning must remain, got ${JSON.stringify(run.results.warnings)}`);
+  }
+
+  if (storage.size !== 0) {
+    throw new Error("D1: clean run must clear resume state");
+  }
+
+  report(run);
+
+  const seeded = new Map();
+  const savedAccounts = following.map((user) => ({
+    username: user.username,
+    fullName: user.full_name,
+    id: user.pk,
+    isPrivate: false,
+    isVerified: false,
+  }));
+
+  seeded.set(`ig-follow-back-resume:${SELF_ID}:${SELF_ID}`, JSON.stringify({
+    createdAt: 1765000000000,
+    lists: {
+      following: { complete: true, accounts: savedAccounts, maxId: "", pageSize: 0 },
+    },
+    verdicts: {},
+  }));
+
+  const rerun = await runScenario({
+    name: "D2: saved 985-account list is reused although the profile still claims 1,000",
+    profile: { id: SELF_ID, username: "tolself", followerCount: 5000, followingCount: 1000 },
+    following,
+    servedFollowers: [],
+    groundTruthFollowerIds,
+    viewerId: SELF_ID,
+    storage: seeded,
+    walls: null,
+  });
+
+  assertExactSet(rerun.name, rerun.results.verifiedNotFollowingBack, expectedMisses);
+
+  if (rerun.fetchLog.some((call) => call.url.includes("/following/?count="))) {
+    throw new Error("D2: a saved list within tolerance must be reused without list requests");
+  }
+
+  report(rerun);
+}
+
 console.log("scale simulation ok");

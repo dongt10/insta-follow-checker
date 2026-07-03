@@ -16,6 +16,7 @@
     "stories",
     "web",
   ]);
+  const SHORTFALL_TOLERANCE_MIN_COUNT = 400;
   const DEFAULT_CONFIG = {
     targetUsername: "",
     relationshipPageSizes: [100, 50],
@@ -51,6 +52,7 @@
     reverifySavedMisses: true,
     breatherEveryRequests: 45,
     breatherMs: 15000,
+    listShortfallTolerance: 0.02,
   };
   const CONFIG = Object.assign(
     {},
@@ -85,6 +87,7 @@
   CONFIG.wallSlowdownMultiplier = clampConfigNumber(CONFIG.wallSlowdownMultiplier, 1, 10, DEFAULT_CONFIG.wallSlowdownMultiplier);
   CONFIG.breatherEveryRequests = Math.floor(clampConfigNumber(CONFIG.breatherEveryRequests, 0, Number.MAX_SAFE_INTEGER, DEFAULT_CONFIG.breatherEveryRequests));
   CONFIG.breatherMs = clampConfigNumber(CONFIG.breatherMs, 0, 600000, DEFAULT_CONFIG.breatherMs);
+  CONFIG.listShortfallTolerance = clampConfigNumber(CONFIG.listShortfallTolerance, 0, 0.5, DEFAULT_CONFIG.listShortfallTolerance);
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalizeUsername = (value) => String(value || "").trim().toLowerCase();
@@ -735,16 +738,22 @@
     const expectedStatusCount = typeof expectedCount === "number" && expectedCount > 0
       ? expectedCount
       : 0;
+    const shortfallTolerance = (
+      typeof expectedCount === "number"
+      && expectedCount >= SHORTFALL_TOLERANCE_MIN_COUNT
+    )
+      ? Math.ceil(expectedCount * CONFIG.listShortfallTolerance)
+      : 0;
     const listIsComplete = () => (
       typeof expectedCount === "number"
       && expectedCount >= 0
-      && usersByUsername.size >= expectedCount
+      && usersByUsername.size >= expectedCount - shortfallTolerance
     );
 
     if (
       savedList?.complete
       && savedAccounts.length > 0
-      && (typeof expectedCount !== "number" || savedAccounts.length >= expectedCount)
+      && (typeof expectedCount !== "number" || savedAccounts.length >= expectedCount - shortfallTolerance)
     ) {
       addUsers(usersByUsername, savedAccounts);
       setStatusBar(`${type}: reused saved list`, usersByUsername.size, expectedStatusCount || usersByUsername.size);
@@ -943,7 +952,7 @@
         if (listIsComplete()) {
           if (sweepIndex < totalSweeps) {
             progress(
-              `${type}: loaded all ${usersByUsername.size} of ${expectedCount} expected accounts, skipping extra passes to save requests.`,
+              `${type}: loaded ${usersByUsername.size} of ${formatNumber(expectedCount)} expected accounts${usersByUsername.size < expectedCount ? " (within the stale-count tolerance)" : ""}, skipping extra passes to save requests.`,
               type,
             );
           }
@@ -963,7 +972,7 @@
 
     if (CONFIG.resume) {
       resume.lists[type] = {
-        complete: typeof expectedCount !== "number" || usersByUsername.size >= expectedCount,
+        complete: typeof expectedCount !== "number" || listIsComplete(),
         accounts: [...usersByUsername.values()],
         maxId: "",
         pageSize: 0,
