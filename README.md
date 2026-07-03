@@ -1,6 +1,6 @@
 # Insta Follow Checker
 
-Browser scripts that check which Instagram accounts do not follow back, with exact verification when Instagram exposes enough relationship data and conservative "unknown" or "unconfirmed" results when it does not.
+A browser script that checks which Instagram accounts do not follow back, with exact verification when Instagram exposes enough relationship data and conservative "unknown" results when it does not. Works on your own account or anyone else's you can view — you do **not** need the target's password, just the ability to see their followers and following from your own logged-in account.
 
 By [dongt10](https://github.com/dongt10).
 
@@ -8,26 +8,9 @@ By [dongt10](https://github.com/dongt10).
 
 Open the rendered helper page: [copy instagram follow back checker](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=c978293).
 
-Click the button for the script or bookmarklet you want. It copies to your clipboard automatically; if the browser blocks clipboard access, the page shows a manual copy box.
+Click the button to copy the script or its bookmarklet. It copies to your clipboard automatically; if the browser blocks clipboard access, the page shows a manual copy box.
 
-- **Self-check console script** for your own account.
-- **Public-account console script** for another visible account.
-- Matching bookmarklets for both scripts.
-
-Source links: [self-check script](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/src/check-follow-back.js), [public-account script](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/src/check-non-followers-public.js), [self-check bookmarklet](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/bookmarklet.js), [public-account bookmarklet](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/bookmarklet-public.js).
-
-## Which script to use
-
-There are two scripts because checking your own account and checking someone else's account have fundamentally different, and conflicting, request patterns. Using the right one keeps each fast and block-safe.
-
-| You are checking | Use | Why |
-| --- | --- | --- |
-| **Your own account** | [src/check-follow-back.js](src/check-follow-back.js) | Can use Instagram's batch friendship endpoint (`show_many`) — a definitive answer for ~25 accounts per request. Fastest and exact. |
-| **Anyone else's account** you can view (public, or private you follow) | [src/check-non-followers-public.js](src/check-non-followers-public.js) | `show_many` only reports relationships relative to *you*, so it cannot answer whether one other account follows another. This script reads the target's follower list once, gently, and takes the exact difference, avoiding the per-account search storm that triggers Instagram's action block. |
-
-You do **not** need the target's password. You only need to be able to see their followers and following from your own logged-in account.
-
-The rest of this README documents the main self-check script. The public script is documented in [its own section below](#checking-someone-elses-account-public-script).
+Source links: [script](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/src/check-follow-back.js), [bookmarklet](https://raw.githubusercontent.com/dongt10/insta-follow-checker/main/bookmarklet.js).
 
 ## What it does
 
@@ -50,7 +33,7 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 3. Open DevTools Console:
    - macOS: `Command + Option + J`
    - Windows/Linux: `Ctrl + Shift + J`
-4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=c978293) and click **copy script** for the self-check script, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
+4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=c978293) and click **copy script**, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
 5. Press Enter.
 
 The page shows a progress overlay (including a live request count and current pacing) while it loads relationship lists and verifies tentative misses. When it finishes, the page is replaced with a result report.
@@ -127,58 +110,21 @@ The final report also keeps the full structured result in `window.IG_FOLLOW_BACK
 
 ## Limits and known problems
 
-The commit history shows this script has mostly evolved around avoiding false positives and avoiding Instagram action blocks. The current scripts are careful, but they still have real limits:
+The commit history shows this script has mostly evolved around avoiding false positives and avoiding Instagram action blocks. The script is careful, but it still has real limits:
 
-- They depend on Instagram's private web endpoints and page data. Instagram can change those APIs, cookies, response shapes, or rate-limit behavior without warning.
-- They only work from a signed-in browser session that can already view the target profile's follower and following lists. Private, blocked, restricted, or temporarily hidden lists cannot be bypassed.
-- Large lists can be incomplete because of stale counts, unavailable accounts, pagination quirks, or Instagram returning HTML instead of JSON. The scripts try to verify tentative misses before counting them, but blocked data can still leave accounts in `Unknown` or `Unconfirmed`.
+- It depends on Instagram's private web endpoints and page data. Instagram can change those APIs, cookies, response shapes, or rate-limit behavior without warning.
+- It only works from a signed-in browser session that can already view the target profile's follower and following lists. Private, blocked, restricted, or temporarily hidden lists cannot be bypassed.
+- Large lists can be incomplete because of stale counts, unavailable accounts, pagination quirks, or Instagram returning HTML instead of JSON. The script tries to verify tentative misses before counting them, but blocked data can still leave accounts in `Unknown`.
 - Instagram may return fewer users than requested on each relationship-list page; for example, a request for `count=100` can still return roughly 25 users. This makes follower-list scans slower than the request size suggests.
 - Self-checks are the most reliable path because `show_many` can answer whether each account follows you back. Small unresolved leftovers, or usernames you explicitly pass in `previousUnknownUsernames`, are rechecked one by one with the individual friendship endpoint. If a batch response shape breaks and hundreds of accounts become unresolved at once, the script stops that wave at `maxIndividualRechecks` and keeps the rest in `Unknown` instead of hammering Instagram.
-- The public/other-account script is intentionally slower and may stop early. That is by design: earlier per-account search patterns could trigger "We limit how often you can do certain things" blocks, so unresolved accounts are parked for a later rerun instead of being forced through.
+- Checking someone else's account is slower and less guarded: `show_many` only answers for your own account, so tentative misses are verified with an exact search per account instead of one batch call. There is no dedicated per-run cap on how many searches that can take, so for accounts with a lot of tentative misses, consider raising `exactSearchDelayMs` and `minRequestIntervalMs` above their defaults to reduce action-block risk.
 - Lowering the delays or verification caps can make the run faster, but it also increases the chance of temporary blocks, logout prompts, and incomplete results.
 - Saved progress stores a local browser snapshot with a 1 hour default TTL. It helps resume interrupted runs, and saved not-following-back results are cross-checked live before reporting, but profile changes during a scan can still leave accounts in `Unknown`.
-- The scripts do not run on Instagram's behalf as an approved integration. Treat them as inspectable browser-console utilities, not a guaranteed long-term API client.
-
-## Checking someone else's account (public script)
-
-Use [src/check-non-followers-public.js](src/check-non-followers-public.js) to check a friend's account you can view but do not own. Paste it into the console exactly like the main script, while viewing the profile you want to check (or set `window.IG_NON_FOLLOWERS_CONFIG = { targetUsername: "their_username" }` first). There is a matching one-line bookmarklet in [bookmarklet-public.js](bookmarklet-public.js).
-
-**How it avoids the action block.** Instagram shows a "We limit how often you can do certain things" warning, and temporarily hides follower/following lists, when it sees rapid automated list loading. The biggest trigger is searching the follower list once per missing account — hundreds of near-identical requests. This script is built to not do that:
-
-- It reads the following list and the follower list **once each**, paged gently (a longer delay between pages, a 1.5s minimum interval between any two requests, automatic slowdown up to 8x whenever Instagram pushes back).
-- If the follower list reads to the end and matches the profile's follower count, the difference is **exact with zero per-account searches** — this is the normal case for accounts up to ~2k, and it is completely block-safe. A 2,000-follower account finishes in roughly 35 requests over about 2-3 minutes.
-- Per-account exact search runs **only** when Instagram under-reported the follower list (so some accounts genuinely cannot be confirmed from the bulk read). Even then it is capped per run (`maxVerifications`, default 150), paced slowly, preceded by a known-follower reliability check, and it **aborts on the first sign of a block** — parking the rest as "Unconfirmed" rather than pushing into a block.
-- At the **first** action block, the run stops, saves progress, and tells you to wait. Rerunning reuses saved pages and verified results, so the rerun is light and continues where the block hit instead of starting the heavy load over.
-
-**Results are split by certainty so nothing is overstated:**
-
-- **Not following back — confirmed:** exact. Either the follower list was read completely, or the account was individually verified as a non-follower.
-- **Not following back — unconfirmed:** the follower list was incomplete and the account could not be proven. It is *not* counted as a definite non-follower. Rerun later (saved progress resumes) to resolve these.
-- **Actually follows back — removed:** a tentative miss that verification proved is really a follower (a false positive the bulk read would have shown).
-- **Unknown:** verification hit a wall for these specific accounts.
-- **Bonus:** followers the target does not follow back, computed for free from the same two lists.
-
-**Speed vs. block-safety knobs** (set in `window.IG_NON_FOLLOWERS_CONFIG` before pasting):
-
-```js
-window.IG_NON_FOLLOWERS_CONFIG = {
-  targetUsername: "",        // or detect from the profile URL you are viewing
-  listDelayMs: 3500,         // delay between follower/following pages (lower = faster, riskier)
-  minRequestIntervalMs: 1500, // hard minimum spacing between any two requests
-  verifyMisses: "auto",      // "auto" = verify only when the follower list is incomplete; false = never search; true = always
-  verifyDelayMs: 4500,       // delay between exact searches when verification is needed
-  maxVerifications: 150,     // safety cap on searches per run; reruns continue beyond it
-  resume: true,              // reuse saved progress from interrupted runs
-};
-```
-
-The defaults are deliberately conservative because you got action-blocked before. They are gentle enough that the common (complete-list) case never searches at all. The full structured result is kept in `window.IG_NON_FOLLOWERS_RESULTS` until the page is reloaded.
-
-Note: this script also works on your own account, but [src/check-follow-back.js](src/check-follow-back.js) is faster there because it can use the batch friendship endpoint.
+- The script does not run on Instagram's behalf as an approved integration. Treat it as an inspectable browser-console utility, not a guaranteed long-term API client.
 
 ## Safety
 
-Only run browser-console scripts you trust. These scripts are intentionally plain JavaScript with no dependencies so they can be inspected before running.
+Only run browser-console scripts you trust. This script is intentionally plain JavaScript with no dependencies so it can be inspected before running.
 
 ## license
 

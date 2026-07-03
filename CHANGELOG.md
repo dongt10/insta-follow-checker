@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- removed the public-account script, its bookmarklet, and related docs/tests. The self-check script already covers checking any account you can view; it is just slower and less guarded on accounts that are not your own, since Instagram's batch friendship endpoint only answers for yourself.
 - simplified the README copy flow with a rendered helper link and clearer clipboard-copy button labels.
 - restyled the copy helper landing page with a dark, minimal design and shorter action labels.
 

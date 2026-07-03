@@ -5,18 +5,10 @@ export const BOOKMARKLET_TARGETS = [
   {
     id: "self-script",
     title: "self check",
-    description: "for your own instagram profile.",
+    description: "for your instagram profile, or anyone else's you can view.",
     source: "../src/check-follow-back.js",
     bookmarklet: "../bookmarklet.js",
-    bookmarkletTitle: "self bookmarklet",
-  },
-  {
-    id: "public-script",
-    title: "public account",
-    description: "for another visible profile.",
-    source: "../src/check-non-followers-public.js",
-    bookmarklet: "../bookmarklet-public.js",
-    bookmarkletTitle: "public bookmarklet",
+    bookmarkletTitle: "bookmarklet",
   },
 ];
 export const COPY_PAGE_TARGET = "../copy.html";
