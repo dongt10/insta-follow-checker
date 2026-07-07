@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Closed three false-positive paths: a `status:"fail"` response with HTTP 200 is now treated as a wall instead of clean data, exact search refuses a "not following back" verdict when the response has no recognizable result list, and a follower list that comes back empty while the profile count is positive stops the run safely instead of exact-searching everything against empty results. Exact search now also requires a reliability canary in every mode; without one, unverified accounts stay Unknown.
+- Added a `fetchTimeoutMs` (45s default) abort-and-retry so one hung request can no longer freeze the whole run.
+- Added a stop button to the progress overlay (and `window.IG_FOLLOW_BACK_STOP()`): the run halts before the next request, interrupts in-progress backoff and breather waits, keeps verified results, parks the rest in Unknown, and saves resume progress. Unexpected errors now also save resume progress before the run ends.
+- Added copy/download actions to the final report (not-following-back usernames, full JSON, CSV with spreadsheet-formula hardening), showed each Unknown account's reason inline, and extended the overlay with wall count, elapsed time, and a per-phase time-left estimate.
+- Validated all numeric settings (typos fall back to defaults instead of silently disabling pacing), warned about unknown config keys, and exposed the resolved config in `window.IG_FOLLOW_BACK_STATE.debug.config`.
+- Rebuilt the bookmarklet with esbuild minification: ~26% smaller, source comments no longer risk breaking the one-line build, and `%` is escaped so browser percent-decoding of the `javascript:` URL cannot corrupt the script.
+- Added regression coverage for the fail-status wall, empty relationship lists, response-shape guards, no-canary parking, config validation and clamping, fetch timeouts, stop requests (via the overlay click path), resume-on-error, report export actions, and bookmarklet/source behavioral parity (with percent-decoding applied like a real browser).
 - Made request pacing adaptive: runs speed up while Instagram responds cleanly, slow down 3x immediately on any wall, recover gradually, and take a short breather every ~45 requests. Large-account runs finish 2-4x faster.
 - Skipped the redundant second list pass when a 400+ account list comes within 2% of the profile count (profile counts include deactivated accounts, so the re-page usually added nothing).
 - Lowered base delays (list pages 1.8s -> 1.1s, batch checks 2.6s -> 1.8s, exact searches 2.4s -> 1.6s, individual rechecks 3.2s -> 2.2s) with a hard 600ms floor between requests that never shrinks.

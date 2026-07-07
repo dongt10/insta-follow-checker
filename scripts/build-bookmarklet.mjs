@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { transform } from "esbuild";
 
 export const BOOKMARKLET_TARGETS = [
   {
@@ -13,12 +14,31 @@ export const BOOKMARKLET_TARGETS = [
 ];
 export const COPY_PAGE_TARGET = "../copy.html";
 
-export function toBookmarklet(source) {
-  return `javascript:${source
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(" ")}\n`;
+export async function toBookmarklet(source) {
+  const { code } = await transform(source, {
+    minify: true,
+    target: "es2020",
+  });
+  // Minified output is a single line except for literal newlines inside
+  // template literals; `\n` escapes are equivalent there, so the rewrite
+  // keeps string contents byte-identical while making the URL one line.
+  const singleLine = code.trim().replace(/\n/g, "\\n");
+
+  if (singleLine.includes("\n")) {
+    throw new Error("bookmarklet must be a single line");
+  }
+
+  new Function(singleLine);
+
+  // Browsers percent-decode a javascript: URL before executing it, so a bare
+  // "%" must be escaped or minified code like `x%10` decodes to garbage.
+  const urlBody = singleLine.replace(/%/g, "%25");
+
+  if (decodeURIComponent(urlBody) !== singleLine) {
+    throw new Error("bookmarklet percent-escaping round-trip failed");
+  }
+
+  return `javascript:${urlBody}\n`;
 }
 
 function escapeJsonForScript(value) {
@@ -41,7 +61,7 @@ export async function getCopyItems() {
 
   for (const target of BOOKMARKLET_TARGETS) {
     const source = await readFile(new URL(target.source, import.meta.url), "utf8");
-    const bookmarklet = toBookmarklet(source);
+    const bookmarklet = await toBookmarklet(source);
 
     items.push({
       id: target.id,
@@ -424,7 +444,7 @@ export async function buildBookmarklet() {
   for (const target of BOOKMARKLET_TARGETS) {
     const source = await readFile(new URL(target.source, import.meta.url), "utf8");
 
-    await writeFile(new URL(target.bookmarklet, import.meta.url), toBookmarklet(source));
+    await writeFile(new URL(target.bookmarklet, import.meta.url), await toBookmarklet(source));
     console.log(`bookmarklet built: ${target.bookmarklet.replace("../", "")}`);
   }
 

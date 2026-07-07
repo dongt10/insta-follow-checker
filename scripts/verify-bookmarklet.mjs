@@ -16,13 +16,15 @@ for (const target of BOOKMARKLET_TARGETS) {
     throw new Error(`${name} must start with javascript:`);
   }
 
-  if (bookmarklet !== toBookmarklet(source)) {
+  if (bookmarklet !== await toBookmarklet(source)) {
     throw new Error(`${name} is out of sync. Run npm run build:bookmarklet.`);
   }
 
   const bookmarkletSource = bookmarklet.slice("javascript:".length).trim();
 
   new Function(bookmarkletSource);
+  // Browsers percent-decode javascript: URLs before executing them.
+  new Function(decodeURIComponent(bookmarkletSource));
 
   console.log(`bookmarklet syntax and sync ok: ${name}`);
 }

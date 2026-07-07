@@ -37,6 +37,7 @@
     followingFeedPageSize: 24,
     followingFeedDelayMs: 1100,
     minRequestIntervalMs: 600,
+    fetchTimeoutMs: 45000,
     minPaceFactor: 0.6,
     paceSpeedupPerClean: 0.93,
     wallSlowdownMultiplier: 3,
@@ -61,35 +62,82 @@
     window.IG_FOLLOW_BACK_CONFIG || {},
   );
 
-  if (!Array.isArray(CONFIG.relationshipPageSizes) || CONFIG.relationshipPageSizes.length === 0) {
-    CONFIG.relationshipPageSizes = DEFAULT_CONFIG.relationshipPageSizes;
-  }
-
-  CONFIG.batchSize = Math.max(1, Math.floor(Number(CONFIG.batchSize) || DEFAULT_CONFIG.batchSize));
-  const configuredMaxIndividualRechecks = Number(CONFIG.maxIndividualRechecks);
-  CONFIG.maxIndividualRechecks = Math.max(
-    0,
-    Math.floor(
-      Number.isFinite(configuredMaxIndividualRechecks)
-        ? configuredMaxIndividualRechecks
-        : DEFAULT_CONFIG.maxIndividualRechecks,
-    ),
-  );
-
   const clampConfigNumber = (value, min, max, fallback) => {
     const parsed = Number(value);
 
     return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
   };
 
-  CONFIG.minPaceFactor = clampConfigNumber(CONFIG.minPaceFactor, 0.05, 1, DEFAULT_CONFIG.minPaceFactor);
-  CONFIG.paceSpeedupPerClean = clampConfigNumber(CONFIG.paceSpeedupPerClean, 0.5, 0.999, DEFAULT_CONFIG.paceSpeedupPerClean);
-  CONFIG.wallSlowdownMultiplier = clampConfigNumber(CONFIG.wallSlowdownMultiplier, 1, 10, DEFAULT_CONFIG.wallSlowdownMultiplier);
-  CONFIG.breatherEveryRequests = Math.floor(clampConfigNumber(CONFIG.breatherEveryRequests, 0, Number.MAX_SAFE_INTEGER, DEFAULT_CONFIG.breatherEveryRequests));
-  CONFIG.breatherMs = clampConfigNumber(CONFIG.breatherMs, 0, 600000, DEFAULT_CONFIG.breatherMs);
-  CONFIG.listShortfallTolerance = clampConfigNumber(CONFIG.listShortfallTolerance, 0, 0.5, DEFAULT_CONFIG.listShortfallTolerance);
+  const NUMERIC_CONFIG_LIMITS = {
+    relationshipPasses: { min: 1, max: 10, integer: true },
+    relationshipListDelayMs: { min: 0, max: 600000 },
+    exactSearchDelayMs: { min: 0, max: 600000 },
+    exactSearchMaxPages: { min: 1, max: 50, integer: true },
+    exactSearchCount: { min: 1, max: 200, integer: true },
+    batchSize: { min: 1, max: 100, integer: true },
+    batchDelayMs: { min: 0, max: 600000 },
+    individualDelayMs: { min: 0, max: 600000 },
+    maxIndividualRechecks: { min: 0, max: Number.MAX_SAFE_INTEGER, integer: true },
+    followingFeedPageSize: { min: 1, max: 100, integer: true },
+    followingFeedDelayMs: { min: 0, max: 600000 },
+    minRequestIntervalMs: { min: 0, max: 60000 },
+    fetchTimeoutMs: { min: 0, max: 600000 },
+    minPaceFactor: { min: 0.05, max: 1 },
+    paceSpeedupPerClean: { min: 0.5, max: 0.999 },
+    wallSlowdownMultiplier: { min: 1, max: 10 },
+    maxSlowdownFactor: { min: 1, max: 100 },
+    retryLimit: { min: 0, max: 20, integer: true },
+    retryBaseDelayMs: { min: 0, max: 600000 },
+    retryMaxDelayMs: { min: 0, max: 3600000 },
+    maxPagesPerPass: { min: 1, max: 10000, integer: true },
+    resumeTtlMs: { min: 0, max: 604800000 },
+    breatherEveryRequests: { min: 0, max: Number.MAX_SAFE_INTEGER, integer: true },
+    breatherMs: { min: 0, max: 600000 },
+    listShortfallTolerance: { min: 0, max: 0.5 },
+  };
 
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  for (const [key, limits] of Object.entries(NUMERIC_CONFIG_LIMITS)) {
+    const clamped = clampConfigNumber(CONFIG[key], limits.min, limits.max, DEFAULT_CONFIG[key]);
+
+    CONFIG[key] = limits.integer ? Math.floor(clamped) : clamped;
+  }
+
+  CONFIG.relationshipPageSizes = (Array.isArray(CONFIG.relationshipPageSizes) ? CONFIG.relationshipPageSizes : [])
+    .map((size) => Math.floor(Number(size)))
+    .filter((size) => Number.isFinite(size) && size > 0);
+
+  if (CONFIG.relationshipPageSizes.length === 0) {
+    CONFIG.relationshipPageSizes = [...DEFAULT_CONFIG.relationshipPageSizes];
+  }
+
+  const unknownConfigKeys = Object.keys(
+    Object.assign({}, window.IG_OVER1K_CONFIG || {}, window.IG_FOLLOW_BACK_CONFIG || {}),
+  ).filter((key) => !(key in DEFAULT_CONFIG));
+
+  if (unknownConfigKeys.length > 0) {
+    console.warn(`[IG follow-back] Ignoring unknown config keys (check for typos): ${unknownConfigKeys.join(", ")}`);
+  }
+
+  const pendingSleepWakers = new Set();
+  const sleep = (ms) => new Promise((resolve) => {
+    if (state.stopRequested) {
+      resolve();
+
+      return;
+    }
+
+    let settled = false;
+    const finish = () => {
+      if (!settled) {
+        settled = true;
+        pendingSleepWakers.delete(finish);
+        resolve();
+      }
+    };
+
+    pendingSleepWakers.add(finish);
+    setTimeout(finish, ms);
+  });
   const normalizeUsername = (value) => String(value || "").trim().toLowerCase();
   const formatNumber = (value) => (
     typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "unknown"
@@ -101,6 +149,46 @@
     "\"": "&quot;",
   }[char]));
   const jitter = (baseMs) => Math.round(baseMs * (0.85 + Math.random() * 0.35));
+  const formatDuration = (ms) => {
+    const totalSeconds = Math.max(0, Math.round(Number(ms) / 1000));
+
+    if (!Number.isFinite(totalSeconds)) {
+      return "unknown";
+    }
+
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  };
+  const isWall = (error) => Boolean(
+    error && (error.authLost || error.rateLimited || error.relationshipBlocked),
+  );
+  const stopStatusFromError = (error) => {
+    if (error?.userStopped) {
+      return "stopped-by-user";
+    }
+
+    if (error?.rateLimited) {
+      return "rate-limited";
+    }
+
+    if (error?.relationshipBlocked) {
+      return "html-blocked";
+    }
+
+    return error?.authLost ? "auth-blocked" : "error";
+  };
+  const usersContainerOf = (response) => {
+    const container = response?.users || response?.items || response?.data?.users;
+
+    return Array.isArray(container) ? container : null;
+  };
 
   const state = {
     startedAt: new Date().toISOString(),
@@ -111,8 +199,10 @@
     walls: 0,
     paceFactor: 1,
     done: false,
+    stopRequested: false,
     debug: {
       batchResponseShapes: [],
+      config: Object.assign({}, CONFIG),
     },
     statusBar: {
       label: "Starting",
@@ -123,6 +213,21 @@
   };
   window.IG_FOLLOW_BACK_STATE = state;
   window.IG_OVER1K_STATE = state;
+
+  function requestStop() {
+    if (state.stopRequested || state.done) {
+      return;
+    }
+
+    state.stopRequested = true;
+
+    for (const wake of [...pendingSleepWakers]) {
+      wake();
+    }
+
+    progress("Stop requested: finishing the current request, saving progress, and reporting what was verified so far.");
+  }
+  window.IG_FOLLOW_BACK_STOP = requestStop;
 
   const breatherTarget = () => Math.max(
     1,
@@ -136,6 +241,7 @@
     nextBreatherAt: breatherTarget(),
   };
   let resumeSaveWarned = false;
+  let activeResumeContext = null;
 
   function paceDelay(baseMs) {
     return jitter(baseMs * pacing.paceFactor);
@@ -169,16 +275,31 @@
     const percent = safeMax > 0
       ? Math.max(0, Math.min(100, Math.round((safeValue / safeMax) * 100)))
       : null;
+    const previous = state.statusBar || {};
+    const labelChanged = previous.label !== label;
 
     state.statusBar = {
       label,
       value: safeValue,
       max: safeMax,
       percent,
+      startedAt: labelChanged || !Number.isFinite(previous.startedAt) ? Date.now() : previous.startedAt,
+      baselineValue: labelChanged || !Number.isFinite(previous.baselineValue) ? safeValue : previous.baselineValue,
     };
   }
 
+  function assertNotStopped() {
+    if (state.stopRequested) {
+      throw new FetchProblem("Stopped by user; the run halted safely before the next request.", {
+        userStopped: true,
+        authLost: true,
+      });
+    }
+  }
+
   async function throttleBeforeRequest() {
+    assertNotStopped();
+
     if (CONFIG.breatherEveryRequests > 0 && pacing.requestsSinceBreather >= pacing.nextBreatherAt) {
       const breatherMs = jitter(CONFIG.breatherMs);
 
@@ -195,6 +316,7 @@
       await sleep(waitMs);
     }
 
+    assertNotStopped();
     pacing.lastRequestAt = Date.now();
     pacing.requestsSinceBreather += 1;
   }
@@ -235,6 +357,8 @@
       || status === 403
       || message.includes("login_required")
       || message.includes("challenge_required")
+      || message.includes("checkpoint_required")
+      || message.includes("consent_required")
     ) {
       return "auth";
     }
@@ -245,6 +369,10 @@
       || message.includes("temporarily blocked")
       || message.includes("feedback_required")
     ) {
+      return "rate";
+    }
+
+    if (status >= 200 && status < 400 && String(parsed?.status || "").toLowerCase() === "fail") {
       return "rate";
     }
 
@@ -331,6 +459,12 @@
       document.documentElement.appendChild(box);
     }
 
+    box.onclick = (event) => {
+      if (event?.target?.closest?.("[data-ig-fb-stop]")) {
+        requestStop();
+      }
+    };
+
     const recentLogs = state.logs
       .slice(-6)
       .map((entry) => `<li>${escapeHtml(entry.message)}</li>`)
@@ -338,15 +472,32 @@
     const statusBar = state.statusBar || {};
     const statusPercent = typeof statusBar.percent === "number" ? statusBar.percent : null;
     const statusWidth = statusPercent == null ? 35 : statusPercent;
+    const startedAtMs = Date.parse(state.startedAt);
+    const elapsedMs = Number.isFinite(startedAtMs) ? Math.max(0, Date.now() - startedAtMs) : 0;
+    const barBaseline = Number.isFinite(statusBar.baselineValue) ? statusBar.baselineValue : 0;
+    const barProgress = statusBar.value - barBaseline;
+    let etaNote = "";
+
+    if (statusPercent != null && barProgress > 0 && statusBar.max > statusBar.value && Number.isFinite(statusBar.startedAt)) {
+      const msPerUnit = (Date.now() - statusBar.startedAt) / barProgress;
+
+      if (Number.isFinite(msPerUnit) && msPerUnit > 0) {
+        etaNote = ` · ~${formatDuration((statusBar.max - statusBar.value) * msPerUnit)} left`;
+      }
+    }
+
     const statusMeta = statusPercent == null
       ? "Working"
-      : `${formatNumber(statusBar.value)} / ${formatNumber(statusBar.max)} (${statusPercent}%)`;
+      : `${formatNumber(statusBar.value)} / ${formatNumber(statusBar.max)} (${statusPercent}%)${etaNote}`;
+    const stopButton = state.done
+      ? ""
+      : `<button type="button" data-ig-fb-stop ${state.stopRequested ? "disabled" : ""} style="margin-left:auto;flex:none;background:transparent;border:1px solid rgba(148,163,184,0.55);border-radius:6px;color:#f8fafc;font:inherit;font-size:12px;padding:2px 10px;cursor:${state.stopRequested ? "default" : "pointer"};opacity:${state.stopRequested ? "0.6" : "1"};">${state.stopRequested ? "stopping…" : "stop"}</button>`;
 
     box.innerHTML = `
-      <div style="font-weight:700;font-size:15px;margin-bottom:6px;">IG follow-back checker</div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;"><span style="font-weight:700;font-size:15px;">IG follow-back checker</span>${stopButton}</div>
       <div><strong>Phase:</strong> ${escapeHtml(state.phase)}</div>
       <div><strong>Status:</strong> ${escapeHtml(state.message)}</div>
-      <div><strong>Requests:</strong> ${escapeHtml(state.requests)} | <strong>Pacing:</strong> ${escapeHtml(pacing.paceFactor.toFixed(1))}x</div>
+      <div><strong>Requests:</strong> ${escapeHtml(state.requests)} | <strong>Walls:</strong> ${escapeHtml(state.walls)} | <strong>Pacing:</strong> ${escapeHtml(pacing.paceFactor.toFixed(1))}x | <strong>Elapsed:</strong> ${escapeHtml(formatDuration(elapsedMs))}</div>
       <div style="margin-top:10px;">
         <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:5px;color:#cbd5e1;font-size:12px;">
           <span>${escapeHtml(statusBar.label || state.phase || "Working")}</span>
@@ -388,10 +539,37 @@
           }
         }
 
+        let timeoutController = null;
+        let timeoutId = 0;
+
+        if (CONFIG.fetchTimeoutMs > 0 && typeof AbortController === "function") {
+          timeoutController = new AbortController();
+          init.signal = timeoutController.signal;
+          timeoutId = setTimeout(() => timeoutController.abort(), CONFIG.fetchTimeoutMs);
+        }
+
         state.requests += 1;
 
-        const response = await fetch(url, init);
-        const text = await response.text();
+        let response;
+        let text;
+
+        try {
+          response = await fetch(url, init);
+          text = await response.text();
+        } catch (fetchError) {
+          if (timeoutController?.signal?.aborted) {
+            throw new FetchProblem(`${label}: no response after ${Math.round(CONFIG.fetchTimeoutMs / 1000)}s, request aborted`, {
+              timedOut: true,
+            });
+          }
+
+          throw fetchError;
+        } finally {
+          if (timeoutId && typeof clearTimeout === "function") {
+            clearTimeout(timeoutId);
+          }
+        }
+
         const contentType = response.headers?.get?.("content-type") || "";
         const retryAfterMs = parseRetryAfterMs(response);
 
@@ -478,7 +656,7 @@
           error.retryAfterMs || 0,
         );
 
-        progress(`${label}: retry ${attempt + 1}/${CONFIG.retryLimit} after ${Math.round(waitMs / 1000)}s`);
+        progress(`${error.message || label}: retry ${attempt + 1}/${CONFIG.retryLimit} after ${Math.round(waitMs / 1000)}s`);
         await sleep(waitMs);
       }
     }
@@ -566,7 +744,7 @@
   }
 
   function extractUsers(response) {
-    const rawUsers = response?.users || response?.items || response?.data?.users || [];
+    const rawUsers = usersContainerOf(response) || [];
 
     return rawUsers
       .map((item) => item?.user || item?.node || item)
@@ -829,8 +1007,16 @@
             `/api/v1/friendships/${target.id}/${type}/?count=${encodeURIComponent(pageSize)}${cursorParam}`,
             `${type} page ${pageCount}`,
           );
+
+          if (!usersContainerOf(response)) {
+            reportWall();
+
+            throw new FetchProblem(`${type} page ${pageCount}: Instagram returned JSON without a recognizable account list`, {
+              relationshipBlocked: true,
+            });
+          }
         } catch (error) {
-          if (!error.authLost && !error.rateLimited && !error.relationshipBlocked) {
+          if (!isWall(error)) {
             if (initialMaxId && pageCount === 1) {
               progress(`${type}: the saved resume position was rejected, restarting this list from the beginning.`, type);
               passes.push({
@@ -847,15 +1033,13 @@
               return { outcome: "cursor-rejected" };
             }
 
+            savePartial(maxId, pageSize);
+
             throw error;
           }
 
           const stopReason = error.message || String(error);
-          const stopStatus = error.rateLimited
-            ? "rate-limited"
-            : error.relationshipBlocked
-              ? "html-blocked"
-              : "auth-blocked";
+          const stopStatus = stopStatusFromError(error);
 
           setStatusBar(`${type}: stopped early`, usersByUsername.size, expectedStatusCount);
           progress(`${type} stopped early: ${stopReason}`, type);
@@ -1026,13 +1210,7 @@
         );
       } catch (error) {
         const stopReason = error.message || String(error);
-        const stopStatus = error.rateLimited
-          ? "rate-limited"
-          : error.relationshipBlocked
-            ? "html-blocked"
-            : error.authLost
-              ? "auth-blocked"
-              : "error";
+        const stopStatus = stopStatusFromError(error);
 
         setStatusBar("following-feed hints: stopped", usersByUsername.size, expectedStatusCount);
         progress(`following-feed hint scan stopped early: ${stopReason}`, "following hints");
@@ -1112,6 +1290,15 @@
       for (let page = 1; page <= CONFIG.exactSearchMaxPages; page += 1) {
         const cursorParam = maxId ? `&max_id=${encodeURIComponent(maxId)}` : "";
         const response = await getJson(`${baseUrl}${cursorParam}`, `exact follower search @${username}`);
+
+        if (!usersContainerOf(response)) {
+          reportWall();
+
+          throw new FetchProblem(`exact follower search @${username}: Instagram returned JSON without a recognizable result list`, {
+            searchShapeUnrecognized: true,
+          });
+        }
+
         const users = extractUsers(response);
         const exactMatch = users.some(
           (user) => normalizeUsername(user.username) === normalizeUsername(username),
@@ -1330,10 +1517,18 @@
     return followedByFromStatus(response, account);
   }
 
-  function resultLines(results) {
-    return results.length
-      ? results.map((account) => `<li><a href="https://www.instagram.com/${escapeHtml(account.username)}/" target="_blank" rel="noreferrer">@${escapeHtml(account.username)}</a> ${escapeHtml(account.fullName)}</li>`).join("")
-      : "<li>none</li>";
+  function resultLines(results, options = {}) {
+    if (!results.length) {
+      return "<li>none</li>";
+    }
+
+    return results.map((account) => {
+      const reason = options.showReason && account.reason
+        ? `<div class="reason" title="${escapeHtml(account.reason)}">${escapeHtml(account.reason)}</div>`
+        : "";
+
+      return `<li><a href="https://www.instagram.com/${escapeHtml(account.username)}/" target="_blank" rel="noreferrer">@${escapeHtml(account.username)}</a> ${escapeHtml(account.fullName)}${reason}</li>`;
+    }).join("");
   }
 
   function statLine(label, value, accent = false) {
@@ -1353,6 +1548,99 @@
       <h2>hint not verified as missing (${hints.notVerifiedMissing.length})</h2>
       <ul class="list">${resultLines(hints.notVerifiedMissing)}</ul>
     `;
+  }
+
+  function resultCsv(result) {
+    const csvEscape = (value) => {
+      let text = String(value == null ? "" : value);
+
+      if (/^[=+\-@\t\r]/.test(text)) {
+        text = `'${text}`;
+      }
+
+      return `"${text.replace(/"/g, "\"\"")}"`;
+    };
+    const rows = [["status", "username", "full_name", "profile_url", "note"]];
+    const buckets = [
+      ["not_following_back", result.verifiedNotFollowingBack],
+      ["follows_back", result.correctedByExactSearch],
+      ["unknown", result.unknown],
+    ];
+
+    for (const [bucket, accounts] of buckets) {
+      for (const account of accounts) {
+        rows.push([
+          bucket,
+          account.username,
+          account.fullName || "",
+          `https://www.instagram.com/${account.username}/`,
+          account.reason || "",
+        ]);
+      }
+    }
+
+    return rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
+  }
+
+  function attachReportActions(result) {
+    const note = document.getElementById("ig-fb-action-note");
+    const setNote = (message) => {
+      if (note) {
+        note.textContent = message;
+      }
+    };
+    const wire = (id, handler) => {
+      const button = document.getElementById(id);
+
+      if (button && typeof button.addEventListener === "function") {
+        button.addEventListener("click", () => {
+          try {
+            handler();
+          } catch (error) {
+            setNote(`failed: ${error.message || error}`);
+          }
+        });
+      }
+    };
+    const download = (filename, mime, content) => {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    };
+    const fileStamp = `instagram-follow-back-${result.target.username}`;
+
+    wire("ig-fb-copy-misses", () => {
+      const text = result.verifiedNotFollowingBack.map((account) => account.username).join("\n");
+      const clipboard = typeof navigator === "undefined" ? null : navigator?.clipboard;
+
+      if (clipboard?.writeText) {
+        clipboard.writeText(text).then(
+          () => setNote(`copied ${result.verifiedNotFollowingBack.length} usernames`),
+          () => {
+            console.log(text);
+            setNote("clipboard blocked; the list was printed to the console instead");
+          },
+        );
+      } else {
+        console.log(text);
+        setNote("clipboard unavailable; the list was printed to the console instead");
+      }
+    });
+    wire("ig-fb-download-json", () => {
+      download(`${fileStamp}.json`, "application/json", JSON.stringify(result, null, 2));
+      setNote("json downloaded");
+    });
+    wire("ig-fb-download-csv", () => {
+      download(`${fileStamp}.csv`, "text/csv", resultCsv(result));
+      setNote("csv downloaded");
+    });
   }
 
   function renderFinalReport(result) {
@@ -1408,6 +1696,10 @@
         ul.list li { break-inside: avoid; margin: 2px 0; }
         ul.list a { color: var(--accent); text-decoration: none; }
         ul.list a:hover { text-decoration: underline; }
+        ul.list .reason { color: var(--quiet); font-size: 12px; line-height: 1.5; margin: 0 0 4px; }
+        .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+        .actions button { background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; }
+        .actions button:hover { border-color: var(--accent); color: var(--accent); }
         .hint-line { color: var(--muted); margin-top: 4px; }
         details { margin-top: 14px; }
         summary { cursor: pointer; color: var(--quiet); font-size: 12px; list-style: none; }
@@ -1427,12 +1719,18 @@
       ${statLine("follows back", result.correctedByExactSearch.length)}
       ${statLine("unknown", result.unknown.length)}
       <div class="meta">verified via ${escapeHtml(result.verificationMethod)} · ${escapeHtml(formatNumber(result.requestsMade))} requests</div>
+      <div class="actions">
+        <button type="button" id="ig-fb-copy-misses">copy not-following-back</button>
+        <button type="button" id="ig-fb-download-json">download json</button>
+        <button type="button" id="ig-fb-download-csv">download csv</button>
+        <span id="ig-fb-action-note" class="meta"></span>
+      </div>
       ${warningLines}
       ${divider}
       <h2>not following back (${result.verifiedNotFollowingBack.length})</h2>
       <ul class="list">${resultLines(result.verifiedNotFollowingBack)}</ul>
       <h2>unknown (${result.unknown.length})</h2>
-      <ul class="list">${resultLines(result.unknown)}</ul>
+      <ul class="list">${resultLines(result.unknown, { showReason: true })}</ul>
       <h2>follows back (${result.correctedByExactSearch.length})</h2>
       <ul class="list">${resultLines(result.correctedByExactSearch)}</ul>
       ${optionalFollowingHintReport(result.followingStatusHints)}
@@ -1453,6 +1751,7 @@
         <p>full structured results are in <code>window.IG_FOLLOW_BACK_RESULTS</code> and <code>window.IG_OVER1K_FOLLOW_BACK_RESULTS</code> until this page is reloaded.</p>
       </details>
     `;
+    attachReportActions(result);
   }
 
   async function run() {
@@ -1485,6 +1784,8 @@
     const resume = loadResumeState(target.id);
     const warnings = [];
 
+    activeResumeContext = { targetId: target.id, resume };
+
     if (
       resume.loadedFromStorage
       && (Object.keys(resume.lists).length > 0 || Object.keys(resume.verdicts).length > 0)
@@ -1502,8 +1803,7 @@
 
     const followingLoad = await loadRelationshipList("following", target, resume);
     const followingListUnavailable = (
-      followingLoad.stoppedEarly
-      && followingLoad.usersByUsername.size === 0
+      followingLoad.usersByUsername.size === 0
       && (typeof target.followingCount !== "number" || target.followingCount > 0)
     );
     const useFollowingStatusHints = Boolean(
@@ -1579,7 +1879,7 @@
 
     const followerListUnavailable = (
       !batchVerification
-      && followerLoad.stoppedEarly
+      && !followerLoad.skipped
       && followerLoad.usersByUsername.size === 0
       && (typeof target.followerCount !== "number" || target.followerCount > 0)
     );
@@ -1727,7 +2027,9 @@
             for (const account of batchAccounts) {
               recordUnknown(
                 account,
-                "Login or rate-limit wall appeared before this batch was checked.",
+                state.stopRequested
+                  ? "Run was stopped before this batch was checked."
+                  : "Login or rate-limit wall appeared before this batch was checked.",
                 { reasonCode: "batch-auth-wall" },
               );
             }
@@ -1749,7 +2051,7 @@
               }
             }
           } catch (error) {
-            if (error.authLost || error.rateLimited || error.relationshipBlocked) {
+            if (isWall(error)) {
               authLost = true;
 
               for (const account of batchAccounts) {
@@ -1789,7 +2091,9 @@
             for (const account of individualFallback) {
               recordUnknown(
                 account,
-                "Login or rate-limit wall appeared before this individual check.",
+                state.stopRequested
+                  ? "Run was stopped before this individual check."
+                  : "Login or rate-limit wall appeared before this individual check.",
                 { reasonCode: "individual-auth-wall" },
               );
             }
@@ -1830,6 +2134,17 @@
           for (let index = 0; index < individualCandidates.length; index += 1) {
             const account = individualCandidates[index];
 
+            if (authLost && CONFIG.stopExactSearchOnAuthLost) {
+              recordUnknown(
+                account,
+                state.stopRequested
+                  ? "Run was stopped before this individual check."
+                  : "Login or rate-limit wall appeared before this individual check.",
+                { reasonCode: "individual-auth-wall", retryIndividually: true },
+              );
+              continue;
+            }
+
             try {
               const followsBack = await individualFriendshipStatus(account);
 
@@ -1844,7 +2159,7 @@
                 exactFallback.push(account);
               }
             } catch (error) {
-              if (error.authLost || error.rateLimited || error.relationshipBlocked) {
+              if (isWall(error)) {
                 authLost = true;
                 recordUnknown(account, error.message || String(error), {
                   reasonCode: "individual-wall",
@@ -1888,7 +2203,7 @@
 
       const exactSearchCanary = followerLoad.usersByUsername.size > 0
         ? followerLoad.usersByUsername.values().next().value
-        : (followerLoad.skipped && batchVerification ? correctedByExactSearch[0] : null);
+        : (correctedByExactSearch[0] || null);
 
       if (
         pendingExactSearch.length > 0
@@ -1903,7 +2218,7 @@
             canaryProblem = `Exact follower search could not find @${canary.username}, a known follower, so search results are not reliable right now.`;
           }
         } catch (error) {
-          if (error.authLost || error.rateLimited || error.relationshipBlocked) {
+          if (isWall(error)) {
             authLost = true;
           }
 
@@ -1925,11 +2240,9 @@
         }
       } else if (
         pendingExactSearch.length > 0
-        && followerLoad.skipped
-        && batchVerification
         && !(authLost && CONFIG.stopExactSearchOnAuthLost)
       ) {
-        const canaryProblem = "Exact follower search was skipped because no known follower was available to prove follower-search reliability after the bulk follower list was skipped.";
+        const canaryProblem = "Exact follower search was skipped because no known follower was available to prove follower-search reliability.";
 
         progress(canaryProblem, "exact verification");
         warnings.push(`${canaryProblem} Unverified accounts were kept in Unknown instead of being counted as not following back.`);
@@ -1945,16 +2258,20 @@
         const account = pendingExactSearch[index];
 
         if (authLost && CONFIG.stopExactSearchOnAuthLost) {
-          recordUnknown(account, "Login or rate-limit wall appeared before exact search.", {
-            reasonCode: "exact-auth-wall",
-          });
+          recordUnknown(
+            account,
+            state.stopRequested
+              ? "Run was stopped before exact search."
+              : "Login or rate-limit wall appeared before exact search.",
+            { reasonCode: "exact-auth-wall" },
+          );
           continue;
         }
 
         try {
           recordVerdict(account, await exactFollowerSearch(target, account.username));
         } catch (error) {
-          if (error.authLost || error.rateLimited || error.relationshipBlocked) {
+          if (isWall(error)) {
             authLost = true;
           }
 
@@ -2034,7 +2351,7 @@
     }
 
     if (followingListUnavailable || followerListUnavailable) {
-      warnings.push(`No reliable not-following-back result was produced because Instagram blocked a required list before enough data loaded. ${rerunAdvice()}`);
+      warnings.push(`No reliable not-following-back result was produced because Instagram blocked a required list or returned it empty before enough data loaded. ${rerunAdvice()}`);
     }
 
     if (
@@ -2055,7 +2372,9 @@
       warnings.push(`Bulk followers list exposed ${followerLoad.usersByUsername.size} of ${target.followerCount}. Each tentative miss was exact-searched in followers; exact-search hits were corrected, and exact-search failures were moved to Unknown.`);
     }
 
-    if (authLost) {
+    if (state.stopRequested) {
+      warnings.push("Run stopped by user. Verified results are trustworthy; unchecked accounts stayed in Unknown, and saved progress makes a rerun lighter.");
+    } else if (authLost) {
       warnings.push(`Login, HTML, or rate-limit wall appeared during exact verification; affected accounts were moved to Unknown instead of counted. ${rerunAdvice()}`);
     }
 
@@ -2098,6 +2417,7 @@
       correctedByExactSearch,
       unknown,
       authLost,
+      stoppedByUser: state.stopRequested,
       warnings,
       verificationMethod,
       requestsMade: state.requests,
@@ -2134,6 +2454,10 @@
   }
 
   run().catch((error) => {
+    if (activeResumeContext) {
+      saveResumeState(activeResumeContext.targetId, activeResumeContext.resume);
+    }
+
     state.done = true;
     setStatusBar("Error", 1, 1);
     progress(error.message || String(error), "error");

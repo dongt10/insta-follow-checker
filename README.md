@@ -21,7 +21,10 @@ Source links: [script](https://raw.githubusercontent.com/dongt10/insta-follow-ch
 - Paces every request adaptively: requests start at a moderate spacing, speed up ~7% per clean response down to a floor, and take a short breather every ~45 requests. On any rate/HTML wall the spacing immediately triples (up to 8x), with exponential backoff that honors `Retry-After` in full (including the HTTP-date form), then gradually speeds back up while responses stay clean. A hard minimum interval between requests never shrinks. Deterministic client errors are not retried at all.
 - Skips requests it does not need: a relationship list that already loaded completely is not re-paged, self-checks only auto-skip the wall-prone bulk follower list when it is much larger than the following list, and if the following list is blocked outright the run stops before spending any follower requests.
 - Saves progress to `localStorage` (1 hour TTL, scoped to your login and the target): interrupted reruns can reuse loaded lists, partial pages, and verified follows-back corrections. Saved not-following-back verdicts are cross-checked live before they appear in the final list, so stale false positives are not reused blindly.
-- Prints only verified not-following-back accounts, with follows-back corrections and unknown results separated.
+- Refuses to trust suspicious data: a `status:"fail"` response, a JSON response without a recognizable account list, or a follower list that comes back empty while the profile count is positive is treated like a wall, so a soft block can never turn the whole following list into false "not following back" results.
+- Aborts any request that hangs longer than `fetchTimeoutMs` (45s default) and retries it, so one stalled request cannot freeze the run.
+- Can be stopped at any time with the **stop** button on the progress overlay (or `window.IG_FOLLOW_BACK_STOP()` in the console): the run halts before the next request, keeps everything already verified, parks the rest in Unknown, and saves progress for a lighter rerun.
+- Prints only verified not-following-back accounts, with follows-back corrections and unknown results (each with its reason) separated. The final report has buttons to copy the not-following-back usernames or download the full result as JSON/CSV.
 - Runs locally in your browser session.
 
 It does not follow, unfollow, message, post, or change your Instagram account.
@@ -36,7 +39,7 @@ It does not follow, unfollow, message, post, or change your Instagram account.
 4. Open the [copy helper](https://raw.githack.com/dongt10/insta-follow-checker/main/copy.html?v=f16735a) and click **copy script**, or paste the script from [src/check-follow-back.js](src/check-follow-back.js).
 5. Press Enter.
 
-The page shows a progress overlay (including a live request count and current pacing) while it loads relationship lists and verifies tentative misses. When it finishes, the page is replaced with a result report.
+The page shows a progress overlay (live request count, wall count, current pacing, elapsed time, and a rough time-left estimate for the current phase) while it loads relationship lists and verifies tentative misses. The overlay's **stop** button halts the run safely at any point. When the run finishes, the page is replaced with a result report.
 
 Refresh the page to return to Instagram.
 
@@ -63,6 +66,7 @@ window.IG_FOLLOW_BACK_CONFIG = {
   batchDelayMs: 1800,              // base delay between batch friendship checks
   individualDelayMs: 2200,         // base delay between one-account friendship rechecks
   minRequestIntervalMs: 600,       // hard minimum spacing between any two requests (never shrinks)
+  fetchTimeoutMs: 45000,           // abort and retry any request with no response after this long (0 disables)
   minPaceFactor: 0.6,              // fastest adaptive pacing: 0.6 = up to 40% quicker than the base delays
   paceSpeedupPerClean: 0.93,       // each clean response multiplies pacing by this (lower = speeds up faster)
   wallSlowdownMultiplier: 3,       // any wall multiplies pacing by this immediately
@@ -70,6 +74,9 @@ window.IG_FOLLOW_BACK_CONFIG = {
   breatherEveryRequests: 45,       // pause for a breather roughly this often (0 disables)
   breatherMs: 15000,               // breather length
   listShortfallTolerance: 0.02,    // skip the extra list pass when a 400+ list is this close to the profile count
+  relationshipPasses: 1,           // full passes over each relationship list
+  relationshipPageSizes: [100, 50], // page sizes tried per pass; extra sizes re-sweep incomplete lists
+  maxPagesPerPass: 250,            // hard page cap per list sweep
   batchVerify: true,               // use batch friendship checks on your own account
   batchSize: 25,                   // accounts per batch friendship check
   individualVerifyUnknowns: true,   // recheck unresolved batch results one by one
@@ -78,6 +85,11 @@ window.IG_FOLLOW_BACK_CONFIG = {
   skipFollowerListWhenSelf: "auto", // skip bulk followers only when it is much larger than following (true, "auto", false)
   includeFollowingStatusHints: true, // use Instagram's follows_viewer hint as extra self-check candidates
   compareFollowingFeed: false,      // self-check only: also scan the GraphQL following feed used by simpler tools
+  followingFeedPageSize: 24,        // page size for the optional following-feed comparison
+  followingFeedDelayMs: 1100,       // base delay between following-feed pages
+  exactSearchCount: 50,            // page size for exact follower searches
+  exactSearchMaxPages: 3,          // search pages per query before giving up as ambiguous
+  stopExactSearchOnAuthLost: true,  // once a wall appears, park remaining checks in Unknown instead of pushing on
   resume: true,                    // reuse saved list progress from interrupted runs
   resumeTtlMs: 3600000,            // how long saved progress stays valid (1 hour)
   reverifySavedMisses: true,        // cross-check saved not-following-back verdicts before reporting
@@ -85,6 +97,8 @@ window.IG_FOLLOW_BACK_CONFIG = {
   retryBaseDelayMs: 12000,         // backoff base; rate walls back off exponentially
 };
 ```
+
+Numeric settings are validated: values that are not finite numbers fall back to the defaults above (so a typo cannot silently disable pacing), out-of-range values are clamped, and unknown keys are reported in the console.
 
 For large accounts, avoid setting delays too low. Instagram can rate-limit or log out fast request bursts. If a run does get walled, wait 10-15 minutes and rerun. Resume makes the rerun lighter, but saved not-following-back verdicts are verified again so stale misses do not become false positives. The adaptive pacing raises delays on its own the moment Instagram pushes back, so tune upward only if runs on your account keep hitting walls.
 
@@ -113,7 +127,7 @@ If you see a warning like `rate-limit wall (200)`, Instagram returned a temporar
 
 If you see `HTML/non-JSON wall (200)` on the followers list, Instagram served the normal website HTML instead of follower JSON for that profile/session. This can happen even while the following list still loads, and the Instagram follower modal may also show an empty/suggested-accounts state. When checking someone else's profile, the script stops with zero verified misses because it cannot prove who follows back until Instagram exposes real follower data again. When checking your own account, this wall does not affect accuracy because the batch friendship check answers directly.
 
-The final report also keeps the full structured result in `window.IG_FOLLOW_BACK_RESULTS` and `window.IG_OVER1K_FOLLOW_BACK_RESULTS` until the page is reloaded.
+The final report keeps the full structured result in `window.IG_FOLLOW_BACK_RESULTS` and `window.IG_OVER1K_FOLLOW_BACK_RESULTS` until the page is reloaded, and its buttons can copy the not-following-back usernames or download everything as JSON/CSV so results survive the reload.
 
 ## Limits and known problems
 
@@ -131,7 +145,7 @@ The commit history shows this script has mostly evolved around avoiding false po
 
 ## Safety
 
-Only run browser-console scripts you trust. This script is intentionally plain JavaScript with no dependencies so it can be inspected before running.
+Only run browser-console scripts you trust. This script is intentionally plain JavaScript with no runtime dependencies so it can be inspected before running (the repository's only dev dependency, esbuild, is used to minify the bookmarklet).
 
 ## license
 
