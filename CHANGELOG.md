@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Restored compatibility with Instagram's current web endpoints: the checker reuses profile data already loaded on the open page instead of hitting the rate-limited profile-info endpoint, uses the live GET form of `show_many`, and falls back to bounded individual friendship checks when the bulk response omits `followed_by`. Auto mode now loads followers instead of skipping that list when reverse bulk statuses are unavailable, and abbreviated visible counts are treated as unknown so pagination cannot stop early on an estimate.
 - Closed three false-positive paths: a `status:"fail"` response with HTTP 200 is now treated as a wall instead of clean data, exact search refuses a "not following back" verdict when the response has no recognizable result list, and a follower list that comes back empty while the profile count is positive stops the run safely instead of exact-searching everything against empty results. Exact search now also requires a reliability canary in every mode; without one, unverified accounts stay Unknown.
 - Added a `fetchTimeoutMs` (45s default) abort-and-retry so one hung request can no longer freeze the whole run.
 - Added a stop button to the progress overlay (and `window.IG_FOLLOW_BACK_STOP()`): the run halts before the next request, interrupts in-progress backoff and breather waits, keeps verified results, parks the rest in Unknown, and saves resume progress. Unexpected errors now also save resume progress before the run ends.

@@ -715,6 +715,229 @@
     return null;
   }
 
+  function exactDisplayedCount(value) {
+    const normalized = String(value || "")
+      .trim()
+      .replace(/\u00a0/g, " ")
+      .replace(/,/g, "");
+    const match = normalized.match(/^(\d+)$/);
+
+    return match ? Number(match[1]) : null;
+  }
+
+  function displayedProfileCount(label) {
+    if (typeof document.querySelectorAll !== "function") {
+      return null;
+    }
+
+    let elements;
+
+    try {
+      elements = [...document.querySelectorAll("a, button, span")];
+    } catch {
+      return null;
+    }
+
+    const labelPattern = new RegExp(`^([\\d,.]+(?:\\s*[KMB])?)\\s+${label}$`, "i");
+
+    for (const element of elements) {
+      const labeledValues = [
+        element?.getAttribute?.("aria-label") || "",
+        element?.textContent || "",
+      ];
+
+      for (const labeledValue of labeledValues) {
+        const match = String(labeledValue).trim().replace(/\s+/g, " ").match(labelPattern);
+
+        if (!match) {
+          continue;
+        }
+
+        const exactTitle = exactDisplayedCount(element?.getAttribute?.("title"));
+
+        if (typeof exactTitle === "number") {
+          return exactTitle;
+        }
+
+        let titledChild = null;
+
+        try {
+          titledChild = element?.querySelector?.("[title]") || null;
+        } catch {
+          titledChild = null;
+        }
+
+        const exactChildTitle = exactDisplayedCount(titledChild?.getAttribute?.("title"));
+
+        if (typeof exactChildTitle === "number") {
+          return exactChildTitle;
+        }
+
+        // Abbreviated values such as 1.2K are deliberately not estimated. An
+        // unknown total makes pagination continue until Instagram says it is
+        // finished instead of risking an early, incomplete stop.
+        const exactText = exactDisplayedCount(match[1]);
+
+        if (typeof exactText === "number") {
+          return exactText;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function reactProfileRecord(username) {
+    if (typeof document.querySelectorAll !== "function") {
+      return null;
+    }
+
+    let elements;
+
+    try {
+      elements = [...document.querySelectorAll("a, button, span")];
+    } catch {
+      return null;
+    }
+
+    const countPattern = /^[\d,.]+(?:\s*[KMB])?\s+(?:followers|following)$/i;
+    const anchors = elements.filter((element) => (
+      countPattern.test(String(element?.textContent || "").trim().replace(/\s+/g, " "))
+    ));
+    const roots = [];
+    const seenFibers = new WeakSet();
+
+    for (const anchor of anchors.slice(0, 4)) {
+      const fiberKey = Object.keys(anchor || {}).find((key) => key.startsWith("__reactFiber$"));
+      let fiber = fiberKey ? anchor[fiberKey] : null;
+
+      for (let depth = 0; fiber && depth < 60; depth += 1, fiber = fiber.return) {
+        if (typeof fiber === "object" && !seenFibers.has(fiber)) {
+          seenFibers.add(fiber);
+          roots.push(fiber.memoizedProps, fiber.pendingProps, fiber.memoizedState);
+        }
+      }
+    }
+
+    const normalizedUsername = normalizeUsername(username);
+    const recordsById = new Map();
+    const seenObjects = new WeakSet();
+    let visited = 0;
+
+    const visit = (value, depth = 0) => {
+      if (
+        depth > 12
+        || visited >= 120000
+        || !value
+        || typeof value !== "object"
+        || value === window
+        || value === document
+        || value.nodeType
+        || seenObjects.has(value)
+      ) {
+        return;
+      }
+
+      seenObjects.add(value);
+      visited += 1;
+
+      if (!Array.isArray(value) && normalizeUsername(value.username || value.user_name) === normalizedUsername) {
+        const rawId = value.id ?? value.pk ?? value.user_id;
+        const id = /^\d+$/.test(String(rawId || "")) ? String(rawId) : "";
+
+        if (id) {
+          const current = recordsById.get(id) || {
+            id,
+            username: value.username || value.user_name || username,
+            fullName: "",
+            followerCount: null,
+            followingCount: null,
+          };
+          const followerCount = profileCount(value, "followers");
+          const followingCount = profileCount(value, "following");
+
+          current.fullName ||= value.full_name || value.fullName || "";
+
+          if (typeof followerCount === "number") {
+            current.followerCount = followerCount;
+          }
+
+          if (typeof followingCount === "number") {
+            current.followingCount = followingCount;
+          }
+
+          recordsById.set(id, current);
+        }
+      }
+
+      let entries = [];
+
+      try {
+        entries = Array.isArray(value)
+          ? value.slice(0, 300).map((entry, index) => [index, entry])
+          : Object.entries(value).slice(0, 300);
+      } catch {
+        return;
+      }
+
+      for (const [, child] of entries) {
+        if (typeof child !== "function") {
+          visit(child, depth + 1);
+        }
+      }
+    };
+
+    for (const root of roots) {
+      visit(root);
+    }
+
+    return [...recordsById.values()]
+      .sort((left, right) => {
+        const score = (record) => (
+          Number(Boolean(record.fullName))
+          + Number(typeof record.followerCount === "number")
+          + Number(typeof record.followingCount === "number")
+        );
+
+        return score(right) - score(left);
+      })[0] || null;
+  }
+
+  function currentPageProfile(username) {
+    if (normalizeUsername(currentPathUsername()) !== normalizeUsername(username)) {
+      return null;
+    }
+
+    const reactRecord = reactProfileRecord(username);
+    let id = reactRecord?.id || "";
+
+    if (!id && typeof document.querySelector === "function") {
+      let isOwnProfile = false;
+
+      try {
+        isOwnProfile = Boolean(document.querySelector('a[href^="/accounts/edit"]'));
+      } catch {
+        isOwnProfile = false;
+      }
+
+      if (isOwnProfile) {
+        id = getCookie("ds_user_id");
+      }
+    }
+
+    if (!/^\d+$/.test(id)) {
+      return null;
+    }
+
+    return {
+      id,
+      username: reactRecord?.username || username,
+      fullName: reactRecord?.fullName || "",
+      followerCount: reactRecord?.followerCount ?? displayedProfileCount("followers"),
+      followingCount: reactRecord?.followingCount ?? displayedProfileCount("following"),
+    };
+  }
+
   function readFollowsViewer(user) {
     const candidates = [
       user.follows_viewer,
@@ -886,6 +1109,14 @@
   async function loadProfileUser(username) {
     setStatusBar("Loading profile", 0, 1);
     progress(`Loading profile @${username}`, "profile");
+    const pageUser = currentPageProfile(username);
+
+    if (pageUser) {
+      progress("Using profile data already loaded on this page; no separate profile request was needed.", "profile");
+
+      return pageUser;
+    }
+
     const profile = await getJson(
       `/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
       "profile",
@@ -1336,12 +1567,8 @@
   async function batchFriendshipStatuses(accounts) {
     const ids = accounts.map((account) => account.id).join(",");
     const response = await getJson(
-      "/api/v1/friendships/show_many/",
+      `/api/v1/friendships/show_many/?user_ids=${encodeURIComponent(ids)}`,
       `friendship batch (${accounts.length} accounts)`,
-      {
-        method: "POST",
-        body: `user_ids=${encodeURIComponent(ids)}`,
-      },
     );
 
     rememberBatchResponseShape(response);
@@ -1830,14 +2057,38 @@
       followingFeedHintLoad = await loadFollowingFeedHints(target, followingLoad);
     }
 
+    const autoSkipByRatio = (
+      CONFIG.skipFollowerListWhenSelf === "auto"
+      && typeof target.followerCount === "number"
+      && typeof target.followingCount === "number"
+      && target.followerCount > target.followingCount * 2
+    );
+    let autoSkipHasReverseStatuses = false;
+
+    if (batchVerification && autoSkipByRatio && followingLoad.usersByUsername.size > 0) {
+      const sampleAccounts = [...followingLoad.usersByUsername.values()].slice(0, CONFIG.batchSize);
+
+      try {
+        const sampleStatuses = await batchFriendshipStatuses(sampleAccounts);
+
+        autoSkipHasReverseStatuses = sampleAccounts.every((account) => (
+          typeof followedByFromStatus(lookupFriendshipStatus(sampleStatuses, account), account) === "boolean"
+        ));
+      } catch {
+        autoSkipHasReverseStatuses = false;
+      }
+
+      if (!autoSkipHasReverseStatuses) {
+        const fallbackNote = "Instagram's bulk friendship response did not expose reverse followed_by statuses, so the checker is loading followers instead of auto-skipping that list.";
+
+        warnings.push(fallbackNote);
+        progress(fallbackNote, "followers");
+      }
+    }
+
     const skipFollowerList = batchVerification && (
       CONFIG.skipFollowerListWhenSelf === true
-      || (
-        CONFIG.skipFollowerListWhenSelf === "auto"
-        && typeof target.followerCount === "number"
-        && typeof target.followingCount === "number"
-        && target.followerCount > target.followingCount * 2
-      )
+      || (autoSkipByRatio && autoSkipHasReverseStatuses)
     );
     const skippedFollowerLoad = (status) => ({
       usersByUsername: new Map(),

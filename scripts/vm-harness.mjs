@@ -21,6 +21,7 @@ export async function runChecker({
   sourceFile = "../src/check-follow-back.js",
   localStorage = null,
   globals = {},
+  documentOverrides = {},
   realTimers = false,
   maxWaitMs = 5000,
 }) {
@@ -34,6 +35,55 @@ export async function runChecker({
   const consoleWarnings = [];
   const elementById = new Map();
   let bodyHtml = "";
+
+  const documentStub = {
+    title: "",
+    cookie,
+    documentElement: {
+      appendChild(element) {
+        if (element.id) {
+          elementById.set(element.id, element);
+        }
+      },
+    },
+    body: {
+      set innerHTML(value) {
+        bodyHtml = value;
+
+        // Register stub elements for every id in the rendered report so
+        // tests can look them up and invoke their click listeners.
+        for (const match of String(value).matchAll(/ id="([^"]+)"/g)) {
+          elementById.set(match[1], {
+            id: match[1],
+            style: {},
+            innerHTML: "",
+            textContent: "",
+            listeners: [],
+            addEventListener(_type, listener) {
+              this.listeners.push(listener);
+            },
+          });
+        }
+      },
+      get innerHTML() {
+        return bodyHtml;
+      },
+      appendChild() {},
+    },
+    getElementById: (id) => elementById.get(id) || null,
+    createElement: () => ({
+      id: "",
+      style: {},
+      innerHTML: "",
+      href: "",
+      download: "",
+      click() {
+        this.clicked = true;
+      },
+      remove() {},
+    }),
+    ...documentOverrides,
+  };
 
   const context = vm.createContext({
     console: {
@@ -58,53 +108,7 @@ export async function runChecker({
       location: { hostname: "www.instagram.com", pathname: `/${username}/` },
       ...(localStorage ? { localStorage } : {}),
     },
-    document: {
-      title: "",
-      cookie,
-      documentElement: {
-        appendChild(element) {
-          if (element.id) {
-            elementById.set(element.id, element);
-          }
-        },
-      },
-      body: {
-        set innerHTML(value) {
-          bodyHtml = value;
-
-          // Register stub elements for every id in the rendered report so
-          // tests can look them up and invoke their click listeners.
-          for (const match of String(value).matchAll(/ id="([^"]+)"/g)) {
-            elementById.set(match[1], {
-              id: match[1],
-              style: {},
-              innerHTML: "",
-              textContent: "",
-              listeners: [],
-              addEventListener(_type, listener) {
-                this.listeners.push(listener);
-              },
-            });
-          }
-        },
-        get innerHTML() {
-          return bodyHtml;
-        },
-        appendChild() {},
-      },
-      getElementById: (id) => elementById.get(id) || null,
-      createElement: () => ({
-        id: "",
-        style: {},
-        innerHTML: "",
-        href: "",
-        download: "",
-        click() {
-          this.clicked = true;
-        },
-        remove() {},
-      }),
-    },
+    document: documentStub,
     ...globals,
   });
 

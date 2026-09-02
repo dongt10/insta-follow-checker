@@ -15,11 +15,12 @@ Source links: [script](https://raw.githubusercontent.com/dongt10/insta-follow-ch
 ## What it does
 
 - Loads the accounts followed by the profile you are viewing.
-- Verifies every tentative miss individually before counting it:
-  - **Your own account:** uses Instagram's batch friendship endpoint (`show_many`), which returns a definitive follows-you-back answer for ~25 accounts per request. This is both exact and far lighter on requests than paging the whole follower list.
+- Reuses the profile ID and exact counts already loaded on the open Instagram profile page, avoiding a separate profile-info request that Instagram may rate-limit. If Instagram only shows an abbreviated count, the checker treats the total as unknown and paginates to the end instead of trusting an estimate.
+- Verifies every tentative miss before counting it:
+  - **Your own account:** checks Instagram's compact friendship response (`show_many`) in groups of ~25, then automatically uses the individual friendship endpoint wherever the bulk response omits `followed_by`.
   - **Someone else's account:** loads their follower list and exact-searches each tentative miss in it.
 - Paces every request adaptively: requests start at a moderate spacing, speed up ~7% per clean response down to a floor, and take a short breather every ~45 requests. On any rate/HTML wall the spacing immediately triples (up to 8x), with exponential backoff that honors `Retry-After` in full (including the HTTP-date form), then gradually speeds back up while responses stay clean. A hard minimum interval between requests never shrinks. Deterministic client errors are not retried at all.
-- Skips requests it does not need: a relationship list that already loaded completely is not re-paged, self-checks only auto-skip the wall-prone bulk follower list when it is much larger than the following list, and if the following list is blocked outright the run stops before spending any follower requests.
+- Skips requests it does not need: a relationship list that already loaded completely is not re-paged, self-checks only auto-skip the wall-prone bulk follower list when it is much larger and the compact friendship response proves it contains reverse statuses, and if the following list is blocked outright the run stops before spending any follower requests.
 - Saves progress to `localStorage` (1 hour TTL, scoped to your login and the target): interrupted reruns can reuse loaded lists, partial pages, and verified follows-back corrections. Saved not-following-back verdicts are cross-checked live before they appear in the final list, so stale false positives are not reused blindly.
 - Refuses to trust suspicious data: a `status:"fail"` response, a JSON response without a recognizable account list, or a follower list that comes back empty while the profile count is positive is treated like a wall, so a soft block can never turn the whole following list into false "not following back" results.
 - Aborts any request that hangs longer than `fetchTimeoutMs` (45s default) and retries it, so one stalled request cannot freeze the run.
@@ -82,7 +83,7 @@ window.IG_FOLLOW_BACK_CONFIG = {
   individualVerifyUnknowns: true,   // recheck unresolved batch results one by one
   maxIndividualRechecks: 80,        // safety cap so a broken batch response does not trigger hundreds of single checks
   previousUnknownUsernames: [],      // optional usernames from a prior Unknown list to prioritize one-by-one
-  skipFollowerListWhenSelf: "auto", // skip bulk followers only when it is much larger than following (true, "auto", false)
+  skipFollowerListWhenSelf: "auto", // skip bulk followers only when much larger and bulk reverse statuses are readable (true forces, false disables)
   includeFollowingStatusHints: true, // use Instagram's follows_viewer hint as extra self-check candidates
   compareFollowingFeed: false,      // self-check only: also scan the GraphQL following feed used by simpler tools
   followingFeedPageSize: 24,        // page size for the optional following-feed comparison
@@ -137,7 +138,7 @@ The commit history shows this script has mostly evolved around avoiding false po
 - It only works from a signed-in browser session that can already view the target profile's follower and following lists. Private, blocked, restricted, or temporarily hidden lists cannot be bypassed.
 - Large lists can be incomplete because of stale counts, unavailable accounts, pagination quirks, or Instagram returning HTML instead of JSON. The script tries to verify tentative misses before counting them, but blocked data can still leave accounts in `Unknown`.
 - Instagram may return fewer users than requested on each relationship-list page; for example, a request for `count=100` can still return roughly 25 users. This makes follower-list scans slower than the request size suggests.
-- Self-checks are the most reliable path because `show_many` can answer whether each account follows you back. Small unresolved leftovers, or usernames you explicitly pass in `previousUnknownUsernames`, are rechecked one by one with the individual friendship endpoint. If a batch response shape breaks and hundreds of accounts become unresolved at once, the script stops that wave at `maxIndividualRechecks` and keeps the rest in `Unknown` instead of hammering Instagram.
+- Self-checks are the most reliable path because Instagram's individual friendship endpoint can answer whether each account follows you back. The checker first tries `show_many` to reduce requests, then rechecks missing reverse statuses one by one. If hundreds of accounts would require individual requests, it stops that wave at `maxIndividualRechecks` and keeps the rest in `Unknown` instead of hammering Instagram.
 - Checking someone else's account is slower and less guarded: `show_many` only answers for your own account, so tentative misses are verified with an exact search per account instead of one batch call. There is no dedicated per-run cap on how many searches that can take, so for accounts with a lot of tentative misses, consider raising `exactSearchDelayMs` and `minRequestIntervalMs` above their defaults to reduce action-block risk.
 - Lowering the delays or verification caps can make the run faster, but it also increases the chance of temporary blocks, logout prompts, and incomplete results.
 - Saved progress stores a local browser snapshot with a 1 hour default TTL. It helps resume interrupted runs, and saved not-following-back results are cross-checked live before reporting, but profile changes during a scan can still leave accounts in `Unknown`.

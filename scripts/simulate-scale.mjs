@@ -26,6 +26,12 @@ function pageOf(list, count, offsetParam) {
   return body;
 }
 
+function showManyIds(url) {
+  const match = String(url).match(/^\/api\/v1\/friendships\/show_many\/\?user_ids=([^&]+)$/);
+
+  return match ? decodeURIComponent(match[1]).split(",").filter(Boolean) : null;
+}
+
 function mockJsonResponse(body) {
   return {
     ok: true,
@@ -139,12 +145,12 @@ function runScenario({ name, profile, following, servedFollowers, groundTruthFol
         return jsonResponse(pageOf(list, Number(listMatch[3]), listMatch[4]));
       }
 
-      if (url === "/api/v1/friendships/show_many/") {
-        const bodyText = String(init.body || "");
-        const ids = decodeURIComponent(bodyText.replace(/^user_ids=/, "")).split(",");
+      const batchIds = showManyIds(url);
+
+      if (batchIds) {
         const friendshipStatuses = {};
 
-        for (const id of ids) {
+        for (const id of batchIds) {
           friendshipStatuses[id] = {
             following: true,
             followed_by: groundTruthFollowerIds.has(id),
@@ -395,7 +401,7 @@ const SELF_ID = "42";
     viewerId: SELF_ID,
     storage,
     walls: (url) => {
-      if (url === "/api/v1/friendships/show_many/") {
+      if (showManyIds(url)) {
         return mockJsonResponse({
           friendship_statuses: {
             1: { following: true, followed_by: true },
@@ -445,7 +451,7 @@ const SELF_ID = "42";
     viewerId: SELF_ID,
     storage,
     walls: (url) => {
-      if (url === "/api/v1/friendships/show_many/") {
+      if (showManyIds(url)) {
         return mockJsonResponse({
           friendship_statuses: {},
           status: "ok",
@@ -489,7 +495,7 @@ const SELF_ID = "42";
     viewerId: SELF_ID,
     storage,
     walls: (url) => {
-      if (url === "/api/v1/friendships/show_many/") {
+      if (showManyIds(url)) {
         return mockJsonResponse({
           friendship_statuses: {},
           status: "ok",
@@ -534,7 +540,7 @@ const SELF_ID = "42";
     storage,
     config: { previousUnknownUsernames: ["retry_00005", "retry_00009"] },
     walls: (url) => {
-      if (url === "/api/v1/friendships/show_many/") {
+      if (showManyIds(url)) {
         return mockJsonResponse({
           friendship_statuses: {},
           status: "ok",
@@ -611,7 +617,7 @@ const SELF_ID = "42";
     throw new Error("B6: complete saved following list should be reused");
   }
 
-  if (!run.fetchLog.some((call) => String(call.url) === "/api/v1/friendships/show_many/")) {
+  if (!run.fetchLog.some((call) => showManyIds(call.url))) {
     throw new Error("B6: saved not-following-back verdict must be rechecked live");
   }
 
@@ -645,7 +651,7 @@ const SELF_ID = "42";
     viewerId: SELF_ID,
     storage,
     walls: (url) => {
-      if (url === "/api/v1/friendships/show_many/") {
+      if (showManyIds(url)) {
         return mockJsonResponse({
           friendship_statuses: {},
           status: "ok",
@@ -697,9 +703,10 @@ const SELF_ID = "42";
   const storage = new Map();
   let wallActive = true;
 
-  const interruptedWalls = (url, attempts, init) => {
-    if (wallActive && url === "/api/v1/friendships/show_many/" && init?.body) {
-      const ids = decodeURIComponent(String(init.body).replace(/^user_ids=/, "")).split(",");
+  const interruptedWalls = (url) => {
+    const ids = showManyIds(url);
+
+    if (wallActive && ids) {
 
       if (Number(ids[0]) > 1025) {
         return "rate-text";

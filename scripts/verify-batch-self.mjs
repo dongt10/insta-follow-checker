@@ -71,17 +71,13 @@ const context = vm.createContext({
       });
     }
 
-    if (url === "/api/v1/friendships/show_many/") {
-      if (init.method !== "POST") {
-        throw new Error("show_many must be a POST request");
+    if (url === `/api/v1/friendships/show_many/?user_ids=${encodeURIComponent("2,3,4")}`) {
+      if (init.method || init.body) {
+        throw new Error("show_many must use the current read-only GET request");
       }
 
-      if (init.headers?.["x-csrftoken"] !== "test-csrf") {
-        throw new Error("show_many must send the csrftoken cookie as x-csrftoken");
-      }
-
-      if (init.body !== `user_ids=${encodeURIComponent("2,3,4")}`) {
-        throw new Error(`unexpected show_many body: ${init.body}`);
+      if (init.headers?.["x-ig-app-id"] !== "936619743392459") {
+        throw new Error("show_many must send Instagram's web app id");
       }
 
       return jsonResponse({

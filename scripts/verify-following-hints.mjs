@@ -91,11 +91,7 @@ const context = vm.createContext({
       });
     }
 
-    if (url === "/api/v1/friendships/show_many/") {
-      if (init.body !== `user_ids=${encodeURIComponent("2,3,4")}`) {
-        throw new Error(`unexpected show_many body: ${init.body}`);
-      }
-
+    if (url === `/api/v1/friendships/show_many/?user_ids=${encodeURIComponent("2,3,4")}`) {
       return jsonResponse({
         friendship_statuses: {
           2: { following: true, followed_by: true },

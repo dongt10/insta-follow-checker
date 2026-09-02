@@ -28,6 +28,11 @@ const run = await runChecker({
     retryBaseDelayMs: 0,
     retryLimit: 0,
     relationshipPageSizes: [100],
+    // This test stops during verdict collection. Auto mode intentionally makes
+    // a capability probe before deciding whether the follower list is safe to
+    // skip, so force the skip here to keep the stop point on the first verdict
+    // batch.
+    skipFollowerListWhenSelf: true,
   },
   fetch: async (url, init, sandbox) => {
     if (url === "/api/v1/users/web_profile_info/?username=friend") {
@@ -48,7 +53,7 @@ const run = await runChecker({
       return jsonResponse({ users: following, status: "ok" });
     }
 
-    if (url === "/api/v1/friendships/show_many/") {
+    if (String(url).startsWith("/api/v1/friendships/show_many/?user_ids=")) {
       showManyCalls += 1;
 
       // Stop through the overlay's click delegation, the same path a real
@@ -61,7 +66,7 @@ const run = await runChecker({
 
       box.onclick({ target: { closest: (selector) => (selector === "[data-ig-fb-stop]" ? {} : null) } });
 
-      const ids = decodeURIComponent(String(init.body || "").replace(/^user_ids=/, "")).split(",");
+      const ids = decodeURIComponent(String(url).split("user_ids=")[1] || "").split(",");
       const friendshipStatuses = {};
 
       for (const id of ids) {

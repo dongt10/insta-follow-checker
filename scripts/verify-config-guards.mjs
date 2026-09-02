@@ -37,7 +37,7 @@ const run = await runChecker({
       });
     }
 
-    if (url === "/api/v1/friendships/show_many/") {
+    if (url === `/api/v1/friendships/show_many/?user_ids=${encodeURIComponent("2")}`) {
       return jsonResponse({
         friendship_statuses: { 2: { following: true, followed_by: true } },
         status: "ok",
