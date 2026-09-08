@@ -19,7 +19,7 @@ Source links: [script](https://raw.githubusercontent.com/dongt10/insta-follow-ch
 - Verifies every tentative miss before counting it:
   - **Your own account:** checks Instagram's compact friendship response (`show_many`) in groups of ~25, then automatically uses the individual friendship endpoint wherever the bulk response omits `followed_by`.
   - **Someone else's account:** loads their follower list and exact-searches each tentative miss in it.
-- Paces every request adaptively: requests start at a moderate spacing, speed up ~7% per clean response down to a floor, and take a short breather every ~45 requests. On any rate/HTML wall the spacing immediately triples (up to 8x), with exponential backoff that honors `Retry-After` in full (including the HTTP-date form), then gradually speeds back up while responses stay clean. A hard minimum interval between requests never shrinks. Deterministic client errors are not retried at all.
+- Paces every request adaptively: requests start at a moderate spacing, speed up ~7% per clean response down to a floor, and take a short breather every ~45 requests. Network and processing time count toward the spacing, so slow responses do not incur another full delay. Individual rechecks use the same 1.1s base spacing as list pages and update the progress bar after every account. On any rate/HTML wall the spacing immediately triples (up to 8x), with exponential backoff that honors `Retry-After` in full (including the HTTP-date form), then gradually speeds back up while responses stay clean. A hard minimum interval between requests never shrinks. Deterministic client errors are not retried at all.
 - Skips requests it does not need: a relationship list that already loaded completely is not re-paged, self-checks only auto-skip the wall-prone bulk follower list when it is much larger and the compact friendship response proves it contains reverse statuses, and if the following list is blocked outright the run stops before spending any follower requests.
 - Saves progress to `localStorage` (1 hour TTL, scoped to your login and the target): interrupted reruns can reuse loaded lists, partial pages, and verified follows-back corrections. Saved not-following-back verdicts are cross-checked live before they appear in the final list, so stale false positives are not reused blindly.
 - Refuses to trust suspicious data: a `status:"fail"` response, a JSON response without a recognizable account list, or a follower list that comes back empty while the profile count is positive is treated like a wall, so a soft block can never turn the whole following list into false "not following back" results.
@@ -62,10 +62,10 @@ All settings are optional. Set them in the console before pasting the script:
 
 ```js
 window.IG_FOLLOW_BACK_CONFIG = {
-  relationshipListDelayMs: 1100,   // base delay between relationship-list pages
-  exactSearchDelayMs: 1600,        // base delay between exact follower searches
-  batchDelayMs: 1800,              // base delay between batch friendship checks
-  individualDelayMs: 2200,         // base delay between one-account friendship rechecks
+  relationshipListDelayMs: 1100,   // base spacing between relationship-list request starts
+  exactSearchDelayMs: 1600,        // base spacing between exact follower searches
+  batchDelayMs: 1800,              // base spacing between batch friendship checks
+  individualDelayMs: 1100,         // base spacing between one-account friendship rechecks
   minRequestIntervalMs: 600,       // hard minimum spacing between any two requests (never shrinks)
   fetchTimeoutMs: 45000,           // abort and retry any request with no response after this long (0 disables)
   minPaceFactor: 0.6,              // fastest adaptive pacing: 0.6 = up to 40% quicker than the base delays
@@ -87,7 +87,7 @@ window.IG_FOLLOW_BACK_CONFIG = {
   includeFollowingStatusHints: true, // use Instagram's follows_viewer hint as extra self-check candidates
   compareFollowingFeed: false,      // self-check only: also scan the GraphQL following feed used by simpler tools
   followingFeedPageSize: 24,        // page size for the optional following-feed comparison
-  followingFeedDelayMs: 1100,       // base delay between following-feed pages
+  followingFeedDelayMs: 1100,       // base spacing between following-feed requests
   exactSearchCount: 50,            // page size for exact follower searches
   exactSearchMaxPages: 3,          // search pages per query before giving up as ambiguous
   stopExactSearchOnAuthLost: true,  // once a wall appears, park remaining checks in Unknown instead of pushing on

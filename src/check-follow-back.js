@@ -28,7 +28,7 @@
     batchSize: 25,
     batchDelayMs: 1800,
     individualVerifyUnknowns: true,
-    individualDelayMs: 2200,
+    individualDelayMs: 1100,
     maxIndividualRechecks: 80,
     previousUnknownUsernames: [],
     skipFollowerListWhenSelf: "auto",
@@ -245,6 +245,17 @@
 
   function paceDelay(baseMs) {
     return jitter(baseMs * pacing.paceFactor);
+  }
+
+  async function waitForRequestSpacing(baseMs) {
+    // Network and processing time already count toward the gap between
+    // requests. Only wait for the part of that interval that remains.
+    // throttleBeforeRequest still enforces the hard floor and any breather.
+    const remainingMs = pacing.lastRequestAt + paceDelay(baseMs) - Date.now();
+
+    if (remainingMs > 0) {
+      await sleep(remainingMs);
+    }
   }
 
   function reportWall() {
@@ -1305,7 +1316,7 @@
         }
 
         maxId = nextMaxId;
-        await sleep(paceDelay(CONFIG.relationshipListDelayMs));
+        await waitForRequestSpacing(CONFIG.relationshipListDelayMs);
       }
 
       passes.push({
@@ -1380,7 +1391,7 @@
         }
 
         if (sweepIndex < totalSweeps) {
-          await sleep(paceDelay(CONFIG.relationshipListDelayMs * 2));
+          await waitForRequestSpacing(CONFIG.relationshipListDelayMs * 2);
         }
       }
     }
@@ -1485,7 +1496,7 @@
       }
 
       after = pageInfo.end_cursor;
-      await sleep(paceDelay(CONFIG.followingFeedDelayMs));
+      await waitForRequestSpacing(CONFIG.followingFeedDelayMs);
     }
 
     passes.push({
@@ -1551,7 +1562,7 @@
         }
 
         maxId = nextMaxId;
-        await sleep(paceDelay(CONFIG.exactSearchDelayMs));
+        await waitForRequestSpacing(CONFIG.exactSearchDelayMs);
       }
     }
 
@@ -2327,7 +2338,7 @@
           saveResumeState(target.id, resume);
 
           if (index + CONFIG.batchSize < withIds.length) {
-            await sleep(paceDelay(CONFIG.batchDelayMs));
+            await waitForRequestSpacing(CONFIG.batchDelayMs);
           }
         }
 
@@ -2376,6 +2387,11 @@
           }
 
           if (individualCandidates.length > 0) {
+            setStatusBar(
+              "Individual verification",
+              verifiedNotFollowingBack.length + correctedByExactSearch.length + unknown.length,
+              tentativeMisses.length,
+            );
             progress(
               `Rechecking ${individualCandidates.length} unresolved account${individualCandidates.length === 1 ? "" : "s"} one by one with individual friendship checks.`,
               "exact verification",
@@ -2421,16 +2437,22 @@
               }
             }
 
+            setStatusBar(
+              "Individual verification",
+              verifiedNotFollowingBack.length + correctedByExactSearch.length + unknown.length,
+              tentativeMisses.length,
+            );
+            progress(
+              `Individual checked ${index + 1}/${individualCandidates.length}: follows back ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
+              "exact verification",
+            );
+
             if ((index + 1) % 10 === 0 || index + 1 === individualCandidates.length) {
-              progress(
-                `Individual checked ${index + 1}/${individualCandidates.length}: follows back ${correctedByExactSearch.length}, verified missing ${verifiedNotFollowingBack.length}, unknown ${unknown.length}`,
-                "exact verification",
-              );
               saveResumeState(target.id, resume);
             }
 
             if (index + 1 < individualCandidates.length) {
-              await sleep(paceDelay(CONFIG.individualDelayMs));
+              await waitForRequestSpacing(CONFIG.individualDelayMs);
             }
           }
         }
@@ -2487,7 +2509,7 @@
 
           pendingExactSearch = [];
         } else {
-          await sleep(paceDelay(CONFIG.exactSearchDelayMs));
+          await waitForRequestSpacing(CONFIG.exactSearchDelayMs);
         }
       } else if (
         pendingExactSearch.length > 0
@@ -2545,7 +2567,7 @@
         }
 
         if (index + 1 < pendingExactSearch.length) {
-          await sleep(paceDelay(CONFIG.exactSearchDelayMs));
+          await waitForRequestSpacing(CONFIG.exactSearchDelayMs);
         }
       }
     }

@@ -12,7 +12,7 @@
   "private": false,
   "scripts": {
     "build:bookmarklet": "node scripts/build-bookmarklet.mjs",
-    "check": "node --check src/check-follow-back.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-page-profile-fallback.mjs && node scripts/verify-exact-search.mjs && node scripts/verify-batch-self.mjs && node scripts/verify-following-hints.mjs && node scripts/verify-rate-limit-wall.mjs && node scripts/verify-html-wall.mjs && node scripts/verify-fail-status.mjs && node scripts/verify-empty-followers.mjs && node scripts/verify-shape-guard.mjs && node scripts/verify-config-guards.mjs && node scripts/verify-fetch-timeout.mjs && node scripts/verify-stop.mjs && node scripts/verify-resume-on-error.mjs && node scripts/verify-report-actions.mjs && node scripts/simulate-scale.mjs"
+    "check": "node --check src/check-follow-back.js && node scripts/verify-bookmarklet.mjs && node scripts/verify-generic.mjs && node scripts/verify-page-profile-fallback.mjs && node scripts/verify-request-pacing.mjs && node scripts/verify-exact-search.mjs && node scripts/verify-batch-self.mjs && node scripts/verify-following-hints.mjs && node scripts/verify-rate-limit-wall.mjs && node scripts/verify-html-wall.mjs && node scripts/verify-fail-status.mjs && node scripts/verify-empty-followers.mjs && node scripts/verify-shape-guard.mjs && node scripts/verify-config-guards.mjs && node scripts/verify-fetch-timeout.mjs && node scripts/verify-stop.mjs && node scripts/verify-resume-on-error.mjs && node scripts/verify-report-actions.mjs && node scripts/simulate-scale.mjs"
   },
   "keywords": [
     "instagram",
